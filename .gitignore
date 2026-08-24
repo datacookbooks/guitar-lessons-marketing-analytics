@@ -1,0 +1,17 @@
+# Python environment
+.venv/
+
+# Local configuration and secrets
+.env
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local downloads and temporary data
+data/
+downloads/
+
+# macOS
+.DS_Store
