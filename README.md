@@ -10,9 +10,12 @@ performance, and data quality.
 
 ## Current phase
 
-The source API is deployed and operational. The current phase builds and tests
-the API extraction process before adding the AWS storage and database layers.
+The source API, historical extraction, and private S3 raw archive are complete.
+The PostgreSQL staging contract is versioned and tested. The current phase
+builds the S3-to-staging loader and its transaction, replay, and watermark
+protections before provisioning RDS.
 
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
+- [Source and staging data dictionary](docs/data_dictionary.md)
