@@ -1,4 +1,4 @@
-"""Discover and read one explicitly selected historical S3 delivery."""
+"""Discover and read explicitly selected raw S3 deliveries."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import boto3
@@ -14,7 +15,8 @@ from .config import HistoricalRunSettings, S3Settings
 from .staging_rows import SOURCE_COLUMNS, StagingPage, s3_document_to_staging_page
 
 _PAGE_KEY = re.compile(
-    r"^raw/historical/(?P<table_name>[a-z][a-z0-9_]*)/"
+    r"^raw/(?P<load_type>historical|incremental)/"
+    r"(?P<table_name>[a-z][a-z0-9_]*)/"
     r"extract_date=(?P<extract_date>\d{4}-\d{2}-\d{2})/"
     r"run_id=(?P<run_id>\d{8}T\d{12}Z)/"
     r"page-(?P<page_number>\d{5})\.json$"
@@ -22,7 +24,7 @@ _PAGE_KEY = re.compile(
 
 
 class S3ReadError(RuntimeError):
-    """Raised when the selected historical S3 delivery cannot be read safely."""
+    """Raised when a selected raw S3 delivery cannot be read safely."""
 
 
 @dataclass(frozen=True)
@@ -59,17 +61,31 @@ def _validate_table_names(table_names: Iterable[str]) -> tuple[str, ...]:
     return names
 
 
-def list_historical_run_objects(
+def list_raw_run_objects(
     *,
     s3_client: Any,
     bucket_name: str,
-    historical_run: HistoricalRunSettings,
+    load_type: str,
+    extract_date: str,
+    run_id: str,
     table_names: Iterable[str] = SOURCE_COLUMNS,
+    require_every_table: bool,
 ) -> tuple[S3ObjectRef, ...]:
-    """List a complete selected run and return objects in table/page order."""
+    """List one exact raw run and return objects in table/page order."""
 
     if not bucket_name.strip():
         raise ValueError("bucket_name cannot be empty.")
+    if load_type not in {"historical", "incremental"}:
+        raise ValueError("load_type must be historical or incremental.")
+    try:
+        parsed_date = date.fromisoformat(extract_date)
+    except ValueError as exc:
+        raise ValueError("extract_date must use YYYY-MM-DD.") from exc
+    run_match = re.fullmatch(r"(?P<date>\d{8})T\d{12}Z", run_id)
+    if run_match is None:
+        raise ValueError("run_id must use YYYYMMDDTHHMMSSffffffZ.")
+    if run_match["date"] != parsed_date.strftime("%Y%m%d"):
+        raise ValueError("extract_date must match the run_id date.")
 
     names = _validate_table_names(table_names)
     refs: list[S3ObjectRef] = []
@@ -79,9 +95,9 @@ def list_historical_run_objects(
 
         for table_name in names:
             prefix = (
-                f"raw/historical/{table_name}/"
-                f"extract_date={historical_run.extract_date}/"
-                f"run_id={historical_run.run_id}/"
+                f"raw/{load_type}/{table_name}/"
+                f"extract_date={extract_date}/"
+                f"run_id={run_id}/"
             )
             table_refs: list[S3ObjectRef] = []
 
@@ -113,9 +129,10 @@ def list_historical_run_objects(
 
                     key_values = match.groupdict()
                     if (
-                        key_values["table_name"] != table_name
-                        or key_values["extract_date"] != historical_run.extract_date
-                        or key_values["run_id"] != historical_run.run_id
+                        key_values["load_type"] != load_type
+                        or key_values["table_name"] != table_name
+                        or key_values["extract_date"] != extract_date
+                        or key_values["run_id"] != run_id
                     ):
                         raise S3ReadError(
                             f"Object key did not match the selected run: {key}"
@@ -141,10 +158,13 @@ def list_historical_run_objects(
                         )
                     )
 
-            if not table_refs:
+            if not table_refs and require_every_table:
                 raise S3ReadError(
                     f"No objects found for {table_name} in the selected run."
                 )
+
+            if not table_refs:
+                continue
 
             table_refs.sort(key=lambda ref: ref.page_number)
             actual_pages = [ref.page_number for ref in table_refs]
@@ -159,9 +179,50 @@ def list_historical_run_objects(
     except S3ReadError:
         raise
     except Exception as exc:
-        raise S3ReadError("Failed to list the selected historical S3 run.") from exc
+        raise S3ReadError("Failed to list the selected S3 run.") from exc
 
     return tuple(refs)
+
+
+def list_historical_run_objects(
+    *,
+    s3_client: Any,
+    bucket_name: str,
+    historical_run: HistoricalRunSettings,
+    table_names: Iterable[str] = SOURCE_COLUMNS,
+) -> tuple[S3ObjectRef, ...]:
+    """List a complete historical run, requiring objects for every table."""
+
+    return list_raw_run_objects(
+        s3_client=s3_client,
+        bucket_name=bucket_name,
+        load_type="historical",
+        extract_date=historical_run.extract_date,
+        run_id=historical_run.run_id,
+        table_names=table_names,
+        require_every_table=True,
+    )
+
+
+def list_incremental_run_objects(
+    *,
+    s3_client: Any,
+    bucket_name: str,
+    extract_date: str,
+    run_id: str,
+    table_names: Iterable[str] = SOURCE_COLUMNS,
+) -> tuple[S3ObjectRef, ...]:
+    """List an incremental run, allowing tables that produced zero pages."""
+
+    return list_raw_run_objects(
+        s3_client=s3_client,
+        bucket_name=bucket_name,
+        load_type="incremental",
+        extract_date=extract_date,
+        run_id=run_id,
+        table_names=table_names,
+        require_every_table=False,
+    )
 
 
 def read_s3_json_object(

@@ -68,6 +68,8 @@ def test_one_page_stops_when_has_more_is_false() -> None:
         [
             FakeResponse(
                 {
+                    "table_name": "fact_payment",
+                    "since": 0,
                     "data": [{"_raw_row_id": 7}],
                     "count": 1,
                     "next_since": 7,
@@ -94,6 +96,8 @@ def test_multiple_pages_use_next_since() -> None:
         [
             FakeResponse(
                 {
+                    "table_name": "fact_payment",
+                    "since": 0,
                     "data": [{"_raw_row_id": 12}],
                     "count": 1,
                     "next_since": 12,
@@ -102,6 +106,8 @@ def test_multiple_pages_use_next_since() -> None:
             ),
             FakeResponse(
                 {
+                    "table_name": "fact_payment",
+                    "since": 12,
                     "data": [{"_raw_row_id": 20}],
                     "count": 1,
                     "next_since": 20,
@@ -129,6 +135,8 @@ def test_stalled_cursor_raises_error() -> None:
         [
             FakeResponse(
                 {
+                    "table_name": "fact_payment",
+                    "since": 0,
                     "data": [{"_raw_row_id": 1}],
                     "count": 1,
                     "next_since": 0,
@@ -157,4 +165,58 @@ def test_http_error_raises_api_response_error() -> None:
         get_table_names(
             "https://example.test",
             session=session,
+        )
+
+
+def test_response_since_must_match_requested_cursor() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "table_name": "fact_payment",
+                    "since": 99,
+                    "data": [],
+                    "count": 0,
+                    "next_since": 99,
+                    "has_more": False,
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(APIResponseError, match="requested cursor 7"):
+        list(
+            iter_table_pages(
+                "https://example.test",
+                "fact_payment",
+                since=7,
+                session=session,
+            )
+        )
+
+
+def test_empty_page_cannot_advance_cursor() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "table_name": "fact_payment",
+                    "since": 7,
+                    "data": [],
+                    "count": 0,
+                    "next_since": 8,
+                    "has_more": False,
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(APIResponseError, match="empty page changed"):
+        list(
+            iter_table_pages(
+                "https://example.test",
+                "fact_payment",
+                since=7,
+                session=session,
+            )
         )

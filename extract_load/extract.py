@@ -99,9 +99,25 @@ def iter_table_pages(
         )
 
         data = payload.get("data")
+        response_table_name = payload.get("table_name")
+        response_since = payload.get("since")
         next_since = payload.get("next_since")
         has_more = payload.get("has_more")
         count = payload.get("count")
+
+        if response_table_name != table_name:
+            raise APIResponseError(
+                f"{table_name}: response table_name did not match the request."
+            )
+
+        if (
+            not isinstance(response_since, int)
+            or isinstance(response_since, bool)
+            or response_since != cursor
+        ):
+            raise APIResponseError(
+                f"{table_name}: response since did not match requested cursor {cursor}."
+            )
 
         if not isinstance(data, list):
             raise APIResponseError(f"{table_name}: data was not a list.")
@@ -116,6 +132,9 @@ def iter_table_pages(
         if not isinstance(has_more, bool):
             raise APIResponseError(f"{table_name}: has_more was not Boolean.")
 
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise APIResponseError(f"{table_name}: count was invalid.")
+
         if count != len(data):
             raise APIResponseError(
                 f"{table_name}: count did not match the number of returned rows."
@@ -129,6 +148,11 @@ def iter_table_pages(
         if has_more and not data:
             raise APIResponseError(
                 f"{table_name}: the API reported more data but returned no rows."
+            )
+
+        if not data and next_since != cursor:
+            raise APIResponseError(
+                f"{table_name}: an empty page changed the cursor from {cursor}."
             )
 
         yield payload
