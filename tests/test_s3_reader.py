@@ -9,6 +9,7 @@ from extract_load.s3_reader import (
     S3ObjectRef,
     S3ReadError,
     list_historical_run_objects,
+    list_incremental_run_objects,
     read_staging_page,
 )
 
@@ -73,6 +74,19 @@ def prefix(table_name: str) -> str:
     return object_key(table_name, 1).removesuffix("page-00001.json")
 
 
+def incremental_key(table_name: str, page_number: int) -> str:
+    return (
+        f"raw/incremental/{table_name}/"
+        "extract_date=2026-08-25/"
+        "run_id=20260825T170000123456Z/"
+        f"page-{page_number:05d}.json"
+    )
+
+
+def incremental_prefix(table_name: str) -> str:
+    return incremental_key(table_name, 1).removesuffix("page-00001.json")
+
+
 def test_lists_every_paginator_page_in_table_and_page_order() -> None:
     client = FakeS3Client(
         objects_by_prefix={
@@ -120,6 +134,29 @@ def test_rejects_a_gap_in_page_numbers() -> None:
             historical_run=RUN,
             table_names=("dim_customer",),
         )
+
+
+def test_incremental_run_allows_a_supported_table_with_zero_objects() -> None:
+    client = FakeS3Client(
+        objects_by_prefix={
+            incremental_prefix("fact_payment"): [
+                [{"Key": incremental_key("fact_payment", 1), "Size": 30}]
+            ]
+        }
+    )
+
+    refs = list_incremental_run_objects(
+        s3_client=client,
+        bucket_name="test-bucket",
+        extract_date="2026-08-25",
+        run_id="20260825T170000123456Z",
+        table_names=("dim_plan", "fact_payment"),
+    )
+
+    assert [(ref.table_name, ref.page_number) for ref in refs] == [
+        ("fact_payment", 1)
+    ]
+    assert len(client.paginator.calls) == 2
 
 
 def test_reads_closes_and_validates_an_s3_page() -> None:

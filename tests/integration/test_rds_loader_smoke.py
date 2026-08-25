@@ -33,7 +33,7 @@ REQUIRED_ENV = (
     "POSTGRES_PASSWORD",
     "POSTGRES_SSLMODE",
     "POSTGRES_SSLROOTCERT",
-    "POSTGRES_CONNECT_TIMEOUT",
+    "POSTGRES_CONNECT_TIMEOUT_SECONDS",
 )
 
 
@@ -53,7 +53,7 @@ def _connect(env: dict[str, str]):
         password=env["POSTGRES_PASSWORD"],
         sslmode=env["POSTGRES_SSLMODE"],
         sslrootcert=env["POSTGRES_SSLROOTCERT"],
-        connect_timeout=int(env["POSTGRES_CONNECT_TIMEOUT"]),
+        connect_timeout=int(env["POSTGRES_CONNECT_TIMEOUT_SECONDS"]),
     )
 
 
