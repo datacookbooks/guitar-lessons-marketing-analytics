@@ -11,9 +11,9 @@ performance, and data quality.
 ## Current phase
 
 The source API, historical extraction, private S3 archive, PostgreSQL staging
-contract, secured RDS instance, and reconciled historical staging load are
-complete. The current phase implements manual, watermark-driven incremental
-extraction through the same replay-safe S3-to-staging path.
+contract, secured RDS instance, historical and incremental staging loads, and
+the cleaned typed analytics layer are complete. The next phase builds tested
+reporting views for the portfolio's business metrics.
 
 ## Historical staging load
 
@@ -73,7 +73,39 @@ python -m extract_load.run_incremental_load \
 Use the actual page counts printed by the original extraction. Zero-page
 tables are part of the contract and do not receive empty S3 objects.
 
+## Staging-to-analytics transformation
+
+The analytics layer contains seven typed, deduplicated dimensions and facts
+plus `analytics.data_quality_issue`. The cleaning contract documents guarded
+casts, normalization, deterministic delivery selection, late corrections, the
+unknown-campaign member, and measurable rejected or superseded values.
+
+Inspect the reviewed SQL plan without opening PostgreSQL:
+
+```bash
+python -m extract_load.run_analytics_transform
+```
+
+The initial production application was deliberately guarded by the exact
+reviewed snapshot of 170,145 staging rows and 178 loaded S3 objects:
+
+```bash
+python -m extract_load.run_analytics_transform \
+  --apply \
+  --expected-staging-rows 170145 \
+  --expected-manifest-objects 178 \
+  --verify-rerun
+```
+
+The command validates the staging baseline before analytics writes, applies
+the versioned DDL and transformation, requires all reviewed table and quality
+counts to reconcile, and fingerprints a second unchanged-staging run to prove
+value invariance. The fixed reconciliation counts intentionally describe this
+reviewed milestone snapshot; revise and re-profile those expectations before
+using the runner after a later incremental staging load.
+
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Source and staging data dictionary](docs/data_dictionary.md)
+- [Analytics cleaning contract](docs/analytics_cleaning_contract.md)

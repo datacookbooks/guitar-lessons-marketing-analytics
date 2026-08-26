@@ -1,323 +1,209 @@
-# Guitar Lessons Marketing Analytics — Architecture and Repository Structure
+# Guitar Lessons Marketing Analytics — Architecture
 
-This project turns the Colab prototype into a daily marketing analytics
-pipeline on AWS. It collects newly generated API data, preserves the raw data
-in S3, loads it into PostgreSQL, transforms it with SQL, and supplies reporting
-views to a BI dashboard.
+This employer-facing portfolio project turns intentionally messy synthetic
+marketing and subscription data into trustworthy PostgreSQL models. It
+demonstrates Python extraction and loading, a replayable S3 raw layer, typed
+SQL transformations, explicit data-quality handling, and—next—reusable
+reporting metrics and a BI dashboard.
 
-The repository is designed to be easy for an employer to review. The Python,
-SQL, documentation, and dashboard materials are separated by purpose, and the
-full data flow is visible from the repository structure.
-
-Place this file in the repository root as `ARCHITECTURE.md` and link to it from
-`README.md`.
-
-## 1. Project goals
-
-- Build a working AWS pipeline that processes new data each day.
-- Use SQL for staging, cleaning, modeling, and reusable reporting views.
-- Create churn, customer lifetime value, campaign ROI, and data-quality
-  analyses.
-- Feed the reporting views into a Tableau Public or Power BI dashboard.
-- Present the work in a repository that is clear, reproducible, and easy to
-  discuss in an interview.
-
-## 2. Architecture overview
+## 1. Implemented architecture
 
 ```mermaid
 flowchart TD
-    A["Data API repository<br/>daily generation cron"] --> B["Python extract-load job<br/>daily AWS schedule"]
-    B --> C["S3<br/>raw JSON archive"]
-    B --> D["RDS PostgreSQL<br/>staging schema"]
-    D --> E["SQL models<br/>analytics and reporting"]
-    E --> F["BI dashboard"]
+    A["GitHub Actions<br/>daily generation request"] --> B["Railway FastAPI + SQLite<br/>persistent source service"]
+    B --> C["Cursor-paginated<br/>read-only API"]
+    C --> D["Python extract/load commands<br/>currently run manually"]
+    D --> E["Amazon S3<br/>private raw JSON archive"]
+    E --> F["Validated S3 page reader"]
+    F --> G["RDS PostgreSQL<br/>source-shaped staging"]
+    G --> H["RDS PostgreSQL<br/>typed analytics models"]
+    H --> I["Reporting views<br/>next milestone"]
+    I --> J["BI dashboard<br/>planned"]
 ```
 
-The data API lives in a separate repository. This analytics repository begins
-with the Python job that retrieves the API data and continues through storage,
-SQL transformation, and dashboarding.
+The source API lives in a separate repository. This analytics repository owns
+the API-to-S3 extraction, validated S3-to-PostgreSQL loading, analytics SQL,
+and later reporting and dashboard assets.
 
-This is an ELT pipeline:
+The implemented path is deliberately S3-first. PostgreSQL never loads an
+unarchived API response: the pipeline writes complete API pages to S3, then
+rediscovers and validates that exact run before allowing staging writes. This
+makes each delivery inspectable and replayable.
 
-1. **Extract:** retrieve newly available rows from the API.
-2. **Load:** save the raw response in S3 and load the rows into PostgreSQL
-   staging tables.
-3. **Transform:** clean and model the data in PostgreSQL with SQL.
+## 2. Source service
 
-S3 and PostgreSQL receive the same API response in parallel. S3 provides a
-durable raw history that can be replayed, while the PostgreSQL staging tables
-support the daily SQL workflow.
+The Railway service uses FastAPI with SQLite on a persistent volume. GitHub
+Actions calls its token-protected generation endpoint daily. Generation is
+deterministic, backfills missed dates, and is idempotent for each business
+date.
 
-## 3. Components
+The analytics repository uses only the public read endpoints:
 
-### 3.1 Daily data API
+- `GET /health`;
+- `GET /status`;
+- `GET /tables`;
+- `GET /tables/{table_name}/raw?since=<cursor>`.
 
-The API will live in its own repository and be deployed separately. That
-repository will contain:
+The API response provides integer `since` and `next_since` cursors. These are
+separate from `_raw_row_id`, which identifies a delivered source row and is
+stored as text in staging.
 
-- the API application;
-- the data-generation scripts;
-- the current generated dataset or persistent backing store; and
-- a cron job that runs the data-generation script once per day.
+## 3. Raw S3 archive
 
-Each cron run advances the simulated business by one day and appends new messy
-records to the relevant source tables. The API then exposes those records to
-the analytics pipeline. Generation and extraction are separate processes: the
-API creates the data on its own schedule, and the AWS job retrieves it later.
-
-The generator should be idempotent for each business date. If the cron job is
-retried, it should detect that the date has already been generated instead of
-creating a second copy. The extraction schedule should run after the expected
-generation time. Because extraction uses a per-table cursor, a later run can
-also collect any rows missed by an earlier run.
-
-A simple API contract is enough:
-
-- `GET /health` — confirms that the service is available.
-- `GET /tables` — returns the available table names.
-- `GET /tables/{table_name}/raw?since=<raw_row_id>` — returns rows created
-  after the supplied cursor.
-
-Every source row should have a stable, increasing `_raw_row_id`. This gives the
-analytics pipeline a reliable incremental-extraction key and protects against
-duplicate loads.
-
-The API contract, base URL environment variable, response format, and error
-behavior should be documented in `extract_load/README.md`.
-
-### 3.2 Python extract-load job
-
-The extract-load job runs once per day after the API generation job. For each
-table, it:
-
-1. reads the last successful `_raw_row_id` from the watermark table;
-2. requests rows after that cursor;
-3. writes the raw JSON response to S3;
-4. loads the same rows into the matching PostgreSQL staging table; and
-5. updates the watermark after both writes succeed.
-
-AWS Lambda triggered by EventBridge Scheduler is a good fit for this project.
-It demonstrates scheduled execution, IAM permissions, S3 access, and a secure
-connection to RDS. The Lambda function and RDS instance will share the required
-network access, and the deployment package will include dependencies such as
-`requests` and `psycopg`.
-
-The control table records extraction progress for each source table:
-
-```sql
-staging.etl_watermark (
-    table_name,
-    last_raw_row_id,
-    last_run_at
-)
-```
-
-Suggested structure:
+Historical and incremental pages use the same versioned object contract:
 
 ```text
-extract_load/
-├── extract_load/
-│   ├── extract.py         # Calls the API with the stored watermark
-│   ├── load_s3.py         # Writes raw JSON to S3
-│   ├── load_staging.py    # Loads rows into PostgreSQL staging
-│   ├── watermark.py       # Reads and updates extraction state
-│   └── run_daily.py       # Runs the daily workflow
-├── requirements.txt
-└── README.md              # Documents configuration and the API contract
+raw/<load_type>/<table_name>/
+  extract_date=YYYY-MM-DD/
+  run_id=YYYYMMDDTHHMMSSffffffZ/
+  page-NNNNN.json
 ```
 
-Use date-partitioned S3 keys so each run is easy to inspect and the archive is
-ready for tools such as Athena:
+The private bucket blocks public access and uses SSE-S3 encryption. Each JSON
+object retains page metadata plus the complete API response. A selected run is
+validated for table identity, wrapper shape, allowed JSON types, page order,
+and cursor continuity before database loading.
 
-```text
-s3://<bucket>/raw/table=fact_payment/dt=2026-08-19/part-0001.json
-```
+## 4. PostgreSQL schemas
 
-### 3.3 RDS PostgreSQL
+One encrypted RDS PostgreSQL instance contains three schemas:
 
-Use one small RDS PostgreSQL instance with three schemas:
-
-| Schema | Purpose |
+| Schema | Implemented responsibility |
 |---|---|
-| `staging` | Raw API rows and pipeline control data |
-| `analytics` | Cleaned tables and reusable analytical models |
-| `reporting` | Dashboard-ready metrics and views |
+| `staging` | Source-shaped text values, raw lineage, object manifests, and API watermarks |
+| `analytics` | Typed deduplicated dimensions/facts and source quality issues |
+| `reporting` | Stable metric and dashboard views; next milestone |
 
-The staging columns can initially preserve the API values as text. The SQL
-transformation layer handles validation, type conversion, standardization, and
-deduplication before loading the analytics tables.
+The connection uses verified TLS. Credentials, endpoints, AWS identifiers,
+and the root-certificate path remain in the ignored local environment.
 
-### 3.4 SQL transformation layer
+### Staging layer
 
-The SQL is split into small files with clear dependencies:
+Seven staging tables preserve intentional source defects rather than hiding
+them during ingestion. Each row retains its S3 key, run ID, load type, page,
+cursor range, extraction time, and load time.
 
-1. schema and table definitions;
-2. staging-to-analytics models;
-3. reusable analytics views; and
-4. dashboard-facing reporting views.
+Each S3 page is applied in one transaction. The loader claims the object,
+inserts duplicate-safe rows, and advances the table watermark together. On
+failure, all three actions roll back. Replaying an already loaded object skips
+it without changing rows or cursors.
 
-`run_pipeline.py` executes the files in dependency order immediately after the
-daily load. Analytics tables are created once, then updated with idempotent
-upserts such as `INSERT ... ON CONFLICT ... DO UPDATE`. This allows the daily
-pipeline to be rerun safely.
+### Analytics layer
 
-Keeping one model per file and writing each transformation around a clear
-`SELECT` also makes a later dbt migration straightforward.
+The implemented analytics layer contains:
 
-### 3.5 BI dashboard
+- `analytics.dim_plan`;
+- `analytics.dim_campaign`;
+- `analytics.dim_customer`;
+- `analytics.fact_subscription_period`;
+- `analytics.fact_payment`;
+- `analytics.fact_campaign_daily`;
+- `analytics.fact_campaign_assignment`;
+- `analytics.data_quality_issue`.
 
-The dashboard reads only from the `reporting` schema. This keeps metric logic
-in SQL and gives every dashboard page the same definitions.
+Versioned SQL applies guarded type conversions, whitespace and case
+normalization, deterministic `ROW_NUMBER()` deduplication, correction-aware
+selection, foreign keys, checks, and indexes. A synthetic campaign with ID
+`-1` preserves assignments containing the controlled unmatched campaign ID.
+Invalid values, exact duplicates, superseded deliveries, blanks, missing
+values, and unknown references remain measurable in the quality table.
 
-- **Tableau Public:** publish an extract built from the reporting views.
-- **Power BI:** connect to the reporting views and configure a scheduled
-  refresh.
+Upserts change rows only when selected lineage or typed values differ. The
+production runner validates the reviewed staging snapshot and the complete
+analytics reconciliation before commit. It can then rerun the transformation
+and fingerprint every persisted value, including audit timestamps, to prove
+unchanged-input invariance.
 
-The dashboard should present churn and retention, customer lifetime value,
-campaign performance, incremental campaign results, and data-quality checks.
-
-## 4. Repository structure
+## 5. Repository structure
 
 ```text
 guitar-lessons-marketing-analytics/
 ├── README.md
 ├── ARCHITECTURE.md
-├── .gitignore
 ├── extract_load/
-│   ├── extract_load/
-│   │   ├── extract.py
-│   │   ├── load_s3.py
-│   │   ├── load_staging.py
-│   │   ├── watermark.py
-│   │   └── run_daily.py
-│   ├── requirements.txt
-│   └── README.md
+│   ├── config.py
+│   ├── extract.py
+│   ├── s3_writer.py
+│   ├── s3_reader.py
+│   ├── staging_rows.py
+│   ├── postgres_loader.py
+│   ├── watermarks.py
+│   ├── run_initial_load.py
+│   ├── run_historical_staging_load.py
+│   ├── run_incremental_load.py
+│   └── run_analytics_transform.py
 ├── sql/
 │   ├── schema/
-│   │   ├── 001_schemas_and_tables.sql
-│   │   └── 002_indexes.sql
+│   │   ├── 001_create_schemas.sql
+│   │   ├── 002_create_staging_tables.sql
+│   │   └── 003_create_etl_control.sql
 │   ├── staging_to_analytics/
-│   │   ├── dim_plan.sql
-│   │   ├── dim_campaign.sql
-│   │   ├── dim_customer.sql
-│   │   ├── fact_subscription_period.sql
-│   │   ├── fact_payment.sql
-│   │   ├── fact_campaign_daily.sql
-│   │   └── fact_campaign_assignment.sql
+│   │   ├── 001_create_analytics_tables.sql
+│   │   └── 002_transform_staging_to_analytics.sql
 │   ├── analytics_views/
-│   │   ├── vw_customer_paid_cohort.sql
-│   │   ├── vw_customer_value.sql
-│   │   ├── vw_plan_monthly_retention.sql
-│   │   ├── vw_expected_12mo_clv_by_plan.sql
-│   │   └── vw_campaign_assignment_outcome.sql
-│   ├── reporting_views/
-│   │   ├── vw_monthly_churn.sql
-│   │   ├── vw_retention_cohort.sql
-│   │   ├── vw_customer_clv.sql
-│   │   ├── vw_campaign_performance.sql
-│   │   ├── vw_incremental_campaign_performance.sql
-│   │   └── vw_data_quality.sql
-│   └── run_pipeline.py
+│   └── reporting_views/
 ├── docs/
 │   ├── data_dictionary.md
-│   ├── metric_definitions.md
-│   └── architecture-diagram.png
-├── dashboard/
-│   ├── screenshots/
-│   └── notes.md
+│   └── analytics_cleaning_contract.md
+├── tests/
+│   └── integration/
+├── dashboard/screenshots/
 └── infra/
-    └── README.md
 ```
 
-## 5. SQL file inventory
+## 6. Validated milestone state
 
-The SQL layer contains twenty files organized by pipeline stage.
+The selected historical load contained 173 S3 objects and 169,932 staging
+rows. A later incremental run added five objects and 213 rows. The reconciled
+staging baseline used for analytics therefore contains 178 manifest objects
+and 170,145 rows, with no duplicate `_raw_row_id` values.
 
-| File | Purpose | Main techniques |
-|---|---|---|
-| `schema/001_schemas_and_tables.sql` | Create the schemas and seven analytics tables | DDL, primary keys, foreign keys, checks |
-| `schema/002_indexes.sql` | Add indexes for customer, campaign, and date lookups | Indexing, `EXPLAIN` |
-| `staging_to_analytics/dim_plan.sql` | Clean and deduplicate plans | Casts, `ROW_NUMBER()` |
-| `staging_to_analytics/dim_campaign.sql` | Standardize campaign fields | `TRIM`, `INITCAP`, deduplication |
-| `staging_to_analytics/dim_customer.sql` | Clean customer fields and validate state codes | Regex, `NULLIF`, deduplication |
-| `staging_to_analytics/fact_subscription_period.sql` | Clean subscription periods | Date checks, deduplication |
-| `staging_to_analytics/fact_payment.sql` | Validate and cast payment amounts | Regex-guarded casts |
-| `staging_to_analytics/fact_campaign_daily.sql` | Validate delivery metrics | Numeric casts, composite-key deduplication |
-| `staging_to_analytics/fact_campaign_assignment.sql` | Clean experiment assignments | Text standardization, deduplication |
-| `analytics_views/vw_customer_paid_cohort.sql` | Find each customer's first paid-plan month | Aggregation |
-| `analytics_views/vw_customer_value.sql` | Calculate realized contribution value by customer | `CASE`, `COALESCE`, date-bounded costs |
-| `analytics_views/vw_plan_monthly_retention.sql` | Calculate average monthly retention by plan | `generate_series`, conditional aggregation |
-| `analytics_views/vw_expected_12mo_clv_by_plan.sql` | Estimate 12-month CLV by plan | `generate_series`, `POWER()` |
-| `analytics_views/vw_campaign_assignment_outcome.sql` | Derive conversion outcomes by campaign type | `UNION ALL`, `EXISTS`, objective-specific joins |
-| `reporting_views/vw_monthly_churn.sql` | Report monthly churn, upgrades, and downgrades | `CROSS JOIN`, `FILTER`, `generate_series` |
-| `reporting_views/vw_retention_cohort.sql` | Report 1-, 3-, 6-, and 12-month retention | `CASE`, `EXISTS`, cohort logic |
-| `reporting_views/vw_customer_clv.sql` | Combine realized value and expected CLV | `LATERAL` join |
-| `reporting_views/vw_campaign_performance.sql` | Report CTR, CPC, CAC, and ROAS | Multi-CTE aggregation |
-| `reporting_views/vw_incremental_campaign_performance.sql` | Estimate lift, incremental CAC, ROI, and ROAS | Intention-to-treat comparison |
-| `reporting_views/vw_data_quality.sql` | Count duplicate, invalid, and unmatched rows | `UNION ALL` quality-event pattern |
+The initial production analytics transformation committed 166,806 rows across
+the seven business models, including the synthetic unknown campaign, plus
+5,848 quality records. A complete second transformation over unchanged
+staging changed no persisted values. Ordinary tests and opt-in live RDS tests
+cover the replay-safe staging loader and rollback-safe analytics validation.
 
-## 6. Daily data flow
+## 7. Current and deferred workflow
 
-1. The API repository's cron job runs the data generator and stores that day's
-   new source rows.
-2. EventBridge triggers the AWS Lambda extract-load job after generation is
-   expected to finish.
-3. The Lambda job reads each table's watermark and requests newer API rows.
-4. The job writes each raw response to S3 and loads the same rows into
-   `staging.<table>`.
-5. After both writes succeed, the job advances the table's watermark.
-6. `run_pipeline.py` updates the analytics tables and reporting views.
-7. The BI dashboard refreshes from the `reporting` schema.
+The API generation schedule is implemented in GitHub Actions. Historical and
+incremental extraction/loading, analytics transformation, and validation are
+currently deliberate manual commands. This keeps failure handling observable
+while the remaining SQL and dashboard layers are built.
 
-## 7. Technology summary
+Automatic downstream scheduling has not been selected or implemented. Earlier
+plans mentioned Lambda and EventBridge, but those are options rather than
+current infrastructure. Scheduling should be chosen only after the reporting
+layer and end-to-end manual workflow are complete.
 
-| Layer | Technology | Role in the project |
-|---|---|---|
-| Data generation and API | Python, FastAPI, separate repository, Railway deployment and cron | Generate and expose new messy data each day |
-| Daily pipeline trigger | AWS Lambda and EventBridge Scheduler | Run extraction and loading on a schedule |
-| Raw archive | Amazon S3 | Preserve replayable, date-partitioned API responses |
-| Database | Amazon RDS for PostgreSQL | Store staging data and run the SQL models |
-| Transformation | SQL files and a small Python runner | Build analytics tables and reporting views |
-| Dashboard | Tableau Public or Power BI | Present the final business metrics |
+## 8. Remaining build order
 
-## 8. Build order
+1. Build analytics and reporting views for churn, retention, realized value,
+   expected 12-month CLV, payment recovery, attributed campaign performance,
+   and holdout-based incremental ROI.
+2. Add `docs/metric_definitions.md` with grains, formulas, eligibility rules,
+   time windows, and denominator handling.
+3. Validate every reporting view locally and against RDS, including checks
+   that prevent fact-to-fact multiplication.
+4. Select Tableau Public or Power BI, build the dashboard, and capture
+   repository screenshots.
+5. Finish employer-facing setup and architecture documentation.
+6. Decide whether and how to schedule the downstream pipeline.
 
-1. **Build and deploy the API repository.** Add the daily generator, cron job,
-   persistent data storage, and incremental endpoints. Confirm that repeated
-   runs for the same date remain idempotent.
-2. **Create the AWS resources.** Set up the S3 bucket, RDS instance, IAM role,
-   networking, Lambda function, and EventBridge schedule. Record the setup in
-   `infra/README.md`.
-3. **Run the extract-load job manually.** Test one complete API-to-S3 and
-   API-to-staging load.
-4. **Schedule the daily job.** Set it to run after the API cron job and verify
-   several consecutive loads.
-5. **Build the seven staging-to-analytics models.** Test cleaning,
-   deduplication, constraints, and rerun behavior.
-6. **Build the analytics and reporting views.** Validate churn, retention,
-   CLV, campaign ROI, and holdout-based incremental results.
-7. **Build and publish the dashboard.** Connect it to the reporting views and
-   capture screenshots for the repository.
-8. **Finish the documentation.** Add the data dictionary, metric definitions,
-   setup instructions, architecture diagram, and dashboard link.
+## 9. Reporting design rules
 
-## 9. Documentation
+- Paid churn includes cancellation and paid-to-Free movement.
+- Pro-to-Master and Master-to-Pro movements are upgrades or downgrades, not
+  paid-logo churn.
+- CLV uses contribution value rather than revenue alone; CAC remains separate.
+- Campaign lift follows intention-to-treat assignment, including holdouts.
+- Campaign facts and customer/payment facts must be aggregated to compatible
+  grains before joining to avoid row multiplication.
+- Dashboard queries read stable `reporting` views rather than reproducing
+  metric definitions in the visualization layer.
 
-- **`README.md`:** project overview, architecture diagram, dashboard link,
-  selected SQL examples, link to the API repository, and setup instructions.
-- **`docs/data_dictionary.md`:** grain, business key, and column definitions
-  for every table.
-- **`docs/metric_definitions.md`:** definitions and assumptions for churn,
-  retention, CLV, campaign attribution, incremental lift, CAC, ROI, and ROAS.
-- **`extract_load/README.md`:** API contract, configuration, watermarks,
-  retry behavior, and local execution instructions.
-- **`infra/README.md`:** AWS resources, permissions, networking, schedules,
-  and deployment steps.
-- **`dashboard/notes.md`:** published dashboard link and screenshots.
+## 10. Decisions still open
 
-## 10. Decisions to finalize during implementation
-
-- Tableau Public or Power BI for the dashboard.
-- The API's persistent storage format and deployment details.
-- The exact daily generation and extraction times.
-- The dashboard refresh schedule.
+- Tableau Public or Power BI for the dashboard;
+- reporting-view refresh and dashboard publication approach;
+- exact downstream scheduling mechanism and timing.
