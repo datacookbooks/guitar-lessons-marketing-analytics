@@ -11,9 +11,10 @@ performance, and data quality.
 ## Current phase
 
 The source API, historical extraction, private S3 archive, PostgreSQL staging
-contract, secured RDS instance, historical and incremental staging loads, and
-the cleaned typed analytics layer are complete. The next phase builds tested
-reporting views for the portfolio's business metrics.
+contract, secured RDS instance, historical and incremental staging loads,
+cleaned typed analytics layer, metric contracts, and tested reporting views
+are complete. The next phase selects the dashboard platform, proves secure
+connectivity and refresh behavior, and builds the shared semantic model.
 
 ## Historical staging load
 
@@ -104,8 +105,41 @@ value invariance. The fixed reconciliation counts intentionally describe this
 reviewed milestone snapshot; revise and re-profile those expectations before
 using the runner after a later incremental staging load.
 
+## Reporting views
+
+The reporting layer contains seven reusable `analytics` helper views and ten
+dashboard-facing `reporting` views. They implement paid-logo movement and
+retention, payment recovery, realized contribution, expected 12-month paid
+CLV, daily campaign delivery, randomized treatment/holdout outcomes,
+incremental campaign impact, and data-quality summaries. The metric contract
+documents every grain, eligibility rule, time window, additive component, and
+intended downstream aggregation.
+
+Inspect the reviewed SQL plan without opening PostgreSQL:
+
+```bash
+python -m extract_load.run_reporting_views
+```
+
+The initial production application was guarded by the exact reviewed
+analytics counts and the shared `2026-08-25` reporting cutoff:
+
+```bash
+python -m extract_load.run_reporting_views \
+  --apply \
+  --expected-data-through-date 2026-08-25 \
+  --verify-rerun
+```
+
+The command applies all 17 views in one transaction, requires the reviewed
+reporting components to reconcile before commit, and reapplies unchanged SQL
+to prove definition replaceability. Its fixed guardrails describe this
+reviewed milestone snapshot; re-profile and deliberately revise them after a
+later incremental analytics load.
+
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Source and staging data dictionary](docs/data_dictionary.md)
 - [Analytics cleaning contract](docs/analytics_cleaning_contract.md)
+- [Metric definitions and semantic-model contract](docs/metric_definitions.md)

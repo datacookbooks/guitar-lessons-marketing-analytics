@@ -3,8 +3,8 @@
 This employer-facing portfolio project turns intentionally messy synthetic
 marketing and subscription data into trustworthy PostgreSQL models. It
 demonstrates Python extraction and loading, a replayable S3 raw layer, typed
-SQL transformations, explicit data-quality handling, and—next—reusable
-reporting metrics and a BI dashboard.
+SQL transformations, explicit data-quality handling, and reusable reporting
+metrics. The BI semantic model and dashboard are the next milestone.
 
 ## 1. Implemented architecture
 
@@ -17,13 +17,13 @@ flowchart TD
     E --> F["Validated S3 page reader"]
     F --> G["RDS PostgreSQL<br/>source-shaped staging"]
     G --> H["RDS PostgreSQL<br/>typed analytics models"]
-    H --> I["Reporting views<br/>next milestone"]
+    H --> I["Reporting views<br/>implemented and validated"]
     I --> J["BI dashboard<br/>planned"]
 ```
 
 The source API lives in a separate repository. This analytics repository owns
-the API-to-S3 extraction, validated S3-to-PostgreSQL loading, analytics SQL,
-and later reporting and dashboard assets.
+the API-to-S3 extraction, validated S3-to-PostgreSQL loading, analytics and
+reporting SQL, and later dashboard assets.
 
 The implemented path is deliberately S3-first. PostgreSQL never loads an
 unarchived API response: the pipeline writes complete API pages to S3, then
@@ -72,7 +72,7 @@ One encrypted RDS PostgreSQL instance contains three schemas:
 |---|---|
 | `staging` | Source-shaped text values, raw lineage, object manifests, and API watermarks |
 | `analytics` | Typed deduplicated dimensions/facts and source quality issues |
-| `reporting` | Stable metric and dashboard views; next milestone |
+| `reporting` | Stable dashboard-facing metric views and additive components |
 
 The connection uses verified TLS. Credentials, endpoints, AWS identifiers,
 and the root-certificate path remain in the ignored local environment.
@@ -114,6 +114,23 @@ analytics reconciliation before commit. It can then rerun the transformation
 and fingerprint every persisted value, including audit timestamps, to prove
 unchanged-input invariance.
 
+### Reporting layer
+
+Seven reusable `analytics` helper views establish the lowest useful grains for
+the shared reporting cutoff, paid cohorts, monthly subscription state,
+customer-month contribution, CLV checkpoints, payment-recovery episodes, and
+campaign-assignment outcomes. Ten `reporting` views then expose stable
+dashboard grains for movement, retention, recovery, value, CLV, campaign
+delivery, experiment arms, incremental impact, and data quality.
+
+The reporting views retain additive numerators and denominators so rates,
+lift, ROAS, ROI, and other non-additive results can be recomputed for the
+selected dashboard context. Campaign spend and assignment outcomes are each
+reduced to a compatible campaign/window grain before joining. The guarded
+production runner verifies the reviewed analytics snapshot, reconciles the
+metric components before commit, and reapplies all 17 views to prove unchanged
+SQL is replaceable.
+
 ## 5. Repository structure
 
 ```text
@@ -131,7 +148,8 @@ guitar-lessons-marketing-analytics/
 │   ├── run_initial_load.py
 │   ├── run_historical_staging_load.py
 │   ├── run_incremental_load.py
-│   └── run_analytics_transform.py
+│   ├── run_analytics_transform.py
+│   └── run_reporting_views.py
 ├── sql/
 │   ├── schema/
 │   │   ├── 001_create_schemas.sql
@@ -141,10 +159,13 @@ guitar-lessons-marketing-analytics/
 │   │   ├── 001_create_analytics_tables.sql
 │   │   └── 002_transform_staging_to_analytics.sql
 │   ├── analytics_views/
+│   │   └── 001_create_reporting_helper_views.sql
 │   └── reporting_views/
+│       └── 001_create_reporting_views.sql
 ├── docs/
 │   ├── data_dictionary.md
-│   └── analytics_cleaning_contract.md
+│   ├── analytics_cleaning_contract.md
+│   └── metric_definitions.md
 ├── tests/
 │   └── integration/
 ├── dashboard/screenshots/
@@ -161,34 +182,38 @@ and 170,145 rows, with no duplicate `_raw_row_id` values.
 The initial production analytics transformation committed 166,806 rows across
 the seven business models, including the synthetic unknown campaign, plus
 5,848 quality records. A complete second transformation over unchanged
-staging changed no persisted values. Ordinary tests and opt-in live RDS tests
-cover the replay-safe staging loader and rollback-safe analytics validation.
+staging changed no persisted values.
+
+The reporting milestone committed seven helper views and ten dashboard-facing
+views after rollback-only RDS validation. Production reconciliation confirmed
+41,458 opening paid observations, 2,664 churned opening observations, 45,261
+mature retention checkpoints, 4,109 failed billing episodes, 2,904 campaign
+daily rows, 32 incremental measurement windows, and 5,848 quality issues. A
+second unchanged-input application produced identical view definitions and
+reconciled exactly.
 
 ## 7. Current and deferred workflow
 
 The API generation schedule is implemented in GitHub Actions. Historical and
 incremental extraction/loading, analytics transformation, and validation are
 currently deliberate manual commands. This keeps failure handling observable
-while the remaining SQL and dashboard layers are built.
+while dashboard connectivity and modeling are evaluated.
 
 Automatic downstream scheduling has not been selected or implemented. Earlier
 plans mentioned Lambda and EventBridge, but those are options rather than
 current infrastructure. Scheduling should be chosen only after the reporting
-layer and end-to-end manual workflow are complete.
+layer, dashboard connectivity, and end-to-end manual workflow are complete.
 
 ## 8. Remaining build order
 
-1. Build analytics and reporting views for churn, retention, realized value,
-   expected 12-month CLV, payment recovery, attributed campaign performance,
-   and holdout-based incremental ROI.
-2. Add `docs/metric_definitions.md` with grains, formulas, eligibility rules,
-   time windows, and denominator handling.
-3. Validate every reporting view locally and against RDS, including checks
-   that prevent fact-to-fact multiplication.
-4. Select Tableau Public or Power BI, build the dashboard, and capture
-   repository screenshots.
-5. Finish employer-facing setup and architecture documentation.
-6. Decide whether and how to schedule the downstream pipeline.
+1. Select Tableau Public or Power BI and prove secure PostgreSQL connectivity
+   plus the intended refresh path.
+2. Build one standardized semantic model with explicit relationships, a date
+   table, documented measures, formats, and hidden technical fields.
+3. Build a thin report and dashboard against that shared model, reconcile its
+   important measures to SQL, and capture repository screenshots.
+4. Finish employer-facing setup and documentation.
+5. Decide whether and how to schedule the downstream pipeline.
 
 ## 9. Reporting design rules
 
