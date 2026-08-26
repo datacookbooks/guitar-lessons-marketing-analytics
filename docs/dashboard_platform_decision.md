@@ -37,8 +37,8 @@ The selected Power BI path must demonstrate all of the following:
 1. Power BI Desktop authoring works reliably in Windows through Parallels.
 2. A dedicated BI login can query only approved analytics dimensions and
    reporting views.
-3. The BI login cannot read staging tables or modify any database objects or
-   data.
+3. The BI login cannot read staging tables or modify persistent database objects
+or source data.
 4. The connection preserves the current single-IPv4 `/32` RDS restriction.
 5. Representative reporting views return usable fields and data types.
 6. The connectivity test causes zero database writes.
@@ -176,8 +176,10 @@ A dedicated BI login will be created with these properties:
   views;
 * no access to the `staging` schema;
 * no access to ETL watermarks or loaded-object manifests;
-* no permission to insert, update, delete, truncate, create, alter, or drop
-  database objects;
+* no permission to insert, update, delete, or truncate source data, or to create,
+  alter, or drop persistent objects in the approved analytical schemas;
+* PostgreSQL's effective `TEMPORARY` database privilege follows the database-wide
+  `PUBLIC` policy rather than a role-specific denial;
 * no superuser, database-creation, role-creation, replication, or row-level
   security bypass privileges; and
 * a password stored outside Git and excluded from screenshots and project

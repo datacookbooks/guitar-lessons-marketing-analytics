@@ -41,7 +41,7 @@ BEGIN
     );
 
     EXECUTE format(
-        'REVOKE CREATE, TEMPORARY ON DATABASE %I FROM marketing_analytics_bi_reader',
+        'REVOKE CREATE ON DATABASE %I FROM marketing_analytics_bi_reader',
         current_database()
     );
 END

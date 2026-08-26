@@ -105,7 +105,7 @@ def test_database_privileges_use_current_database_without_secret_values() -> Non
         in sql
     )
     assert (
-        f"revoke create, temporary on database %i from {BI_ROLE}"
+        f"revoke create on database %i from {BI_ROLE}"
         in sql
     )
 
