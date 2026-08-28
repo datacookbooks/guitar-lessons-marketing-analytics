@@ -1,7 +1,8 @@
 # Dashboard Platform and Connectivity Decision
 
-Status: Spike in progress
+Status: Complete
 Date: 2026-08-26
+Completed: 2026-08-28
 
 ## Purpose
 
@@ -23,7 +24,9 @@ built.
   publication.
 * The current data volume is modest, and near-real-time reporting is not
   required.
-* The project will use one standardized semantic model and a thin report.
+* The project will use one standardized semantic model. Physical separation of
+  a thin report from that model remains subject to Publish-to-web compatibility
+  testing during the next milestone.
 * Database credentials, endpoints, AWS identifiers, security-group
   identifiers, and public IP addresses must not be committed or shown in
   screenshots.
@@ -38,7 +41,7 @@ The selected Power BI path must demonstrate all of the following:
 2. A dedicated BI login can query only approved analytics dimensions and
    reporting views.
 3. The BI login cannot read staging tables or modify persistent database objects
-or source data.
+   or source data.
 4. The connection preserves the current single-IPv4 `/32` RDS restriction.
 5. Representative reporting views return usable fields and data types.
 6. The connectivity test causes zero database writes.
@@ -130,9 +133,9 @@ Current findings:
 
 Power BI is the selected BI platform.
 
-Power BI Desktop will run in Windows through Parallels on the project owner's
-Mac. Import mode is the provisional storage choice because the current data
-volume is modest and near-real-time reporting is not required.
+Power BI Desktop runs in Windows through Parallels on the project owner's Mac.
+Import mode is the selected storage choice because the current data volume is
+modest and near-real-time reporting is not required.
 
 The proposed path is:
 
@@ -140,14 +143,16 @@ The proposed path is:
 2. It connects to RDS from the currently approved public IPv4 `/32`.
 3. It authenticates with a dedicated read-only BI login.
 4. It imports only approved analytics dimensions and reporting views.
-5. One standardized semantic model owns relationships, the date table, shared
-   DAX measures, formats, descriptions, and hidden technical fields.
-6. A thin report connects to that semantic model.
+5. One standardized semantic model will own relationships, the date table,
+   shared DAX measures, formats, descriptions, and hidden technical fields.
+6. The report will use that canonical model without duplicating business logic;
+   a physically separate thin-report configuration will be used only if its
+   Publish-to-web compatibility is proven.
 7. The semantic model and report are published to the Power BI service.
-8. Public portfolio sharing and refresh behavior are tested without weakening
-   RDS network access.
+8. Public portfolio sharing uses a manually refreshed static Import snapshot
+   without weakening RDS network access.
 
-Import mode is preferred provisionally because:
+Import mode is selected because:
 
 * the model is small enough to import efficiently;
 * near-real-time reporting is not required;
@@ -200,106 +205,107 @@ perform a database write.
 The current RDS security group permits inbound PostgreSQL traffic only from
 the project owner's current public IPv4 address as a `/32`.
 
-Power BI Desktop running in Parallels should reach RDS through the Mac's current
-internet connection and approved public IP. This must be tested directly.
+Power BI Desktop running in Parallels reached RDS through the Mac's approved
+public IP. The first encrypted connection failed because Windows did not trust
+the RDS certificate chain. Installing the official Amazon RDS `us-east-1` CA
+bundle in the current Windows user's trusted-root store resolved the issue
+without bypassing certificate validation or encryption.
 
 The RDS security group must not be broadened to `0.0.0.0/0` or `::/0`.
 
-If the Power BI service cannot connect directly to RDS under the existing
-restriction, the project will use either:
-
-* a securely configured on-premises gateway running through the Windows
-  environment; or
-* manual Import refresh in Power BI Desktop followed by republication.
-
-The project will not weaken RDS network access merely to enable cloud refresh.
+The selected design uses manual Import refresh in Power BI Desktop followed by
+republication. The Power BI service receives the imported snapshot and does
+not require a direct RDS connection. The project will not configure a gateway,
+service-side database credentials, DirectQuery, or broader RDS ingress merely
+to enable cloud refresh.
 
 ## Publication design
 
-The spike will publish only a minimal disposable report containing synthetic
-data.
+The owner created an independently controlled Microsoft Entra ID Free tenant
+rather than relying on a school-controlled identity. A dedicated cloud-only
+Power BI identity has the `Fabric Administrator` role and a `Fabric (Free)`
+license. No Power BI Pro, Premium Per User, Fabric capacity trial, Azure paid
+capacity, or Azure workload was purchased or activated.
 
-Before permanent publication, the spike must verify:
+The tenant's Publish-to-web setting is enabled only for the assigned-membership
+security group `Power BI Publish to Web Creators`. The dedicated Power BI
+identity is a direct member. New embed-code creation was explicitly enabled;
+the tenant-wide Block Public Internet Access setting remains disabled because
+anonymous publication requires public reachability.
 
-* whether the current Power BI account can publish from My workspace;
-* whether Publish to web is enabled for the tenant;
-* whether the current license can create a public embed code;
-* whether an administrator action is required;
-* whether viewers can access the report without authentication;
-* whether underlying or summarized data can be downloaded;
-* whether the semantic model contains any unnecessary customer-level fields;
-* whether database credentials are included in or exposed by the publication;
-  and
-* how the public artifact can be disabled or deleted.
+The disposable `guitar-analytics-connectivity-test` report was published from
+Power BI Desktop to `My workspace`. The service created both a report and its
+Import semantic model. The Fabric Free identity successfully created a
+Publish-to-web code without a Pro purchase. The public URL loaded without
+authentication in an incognito browser, and the generated report worked
+normally inside a local HTML iframe. Filters and report interactions remained
+functional. The public-view options were inspected and showed no unexpected
+or sensitive fields.
 
-Publish to web will not be used with real, confidential, personal, or
-credential-bearing data.
+Publish to web makes the report and the data included in its semantic model
+intentionally public. Permanent publication is therefore limited to synthetic
+portfolio data. Credentials, RDS endpoints, public IPs, AWS identifiers, and
+unnecessary customer-level fields must remain outside public artifacts.
+
+The disposable embed code, report, and semantic model are being retained
+temporarily as a known-working publication reference. They must be removed when
+the final portfolio report replaces them. This retention is not a licensing
+requirement: separate reports can have separate embed codes.
 
 ## Refresh design
 
-Three refresh behaviors will be distinguished during testing:
+Power BI Desktop successfully refreshed the disposable Import model from RDS
+over verified TLS. Before relocation, the remaining approved BI objects were
+imported into the canonical working PBIX, and Model view confirmed that every
+loaded table uses Import storage mode. The completed import is a point-in-time
+copy stored in the PBIX; reopening the file does not automatically contact RDS.
 
-1. **Power BI Desktop refresh**
+The final public report will use a reviewed static Import snapshot. Intentional
+updates will use a manual Desktop refresh from an authorized public IPv4 `/32`,
+followed by republication. No Power BI service manual or scheduled database
+refresh is required. No gateway, service-side RDS credentials, DirectQuery, or
+continuous RDS availability will be configured for the public portfolio.
 
-   Power BI Desktop connects from Parallels to RDS, refreshes the local Import
-   model, and republishes the semantic model and report.
+Away from an authorized network, the owner can safely build relationships, a
+date table, DAX, formats, report pages, visuals, slicers, and navigation from
+the saved Import model. Source refresh, adding PostgreSQL objects, and
+source-dependent Power Query changes must wait for an authorized network.
 
-2. **Power BI service manual refresh**
+## Completed hands-on tests
 
-   The Power BI service refreshes the published semantic model using its
-   configured connection or gateway.
-
-3. **Power BI service scheduled refresh**
-
-   The Power BI service refreshes automatically on a schedule using a supported
-   connection or an available gateway.
-
-A scheduled refresh through an on-premises gateway may require the Parallels
-Windows virtual machine and Mac to remain running. That operational dependency
-may be excessive for this portfolio.
-
-Manual Desktop refresh and republication may therefore be the preferred
-initial approach. This is acceptable because the project does not require
-near-real-time reporting and downstream pipeline scheduling remains deferred.
-
-The final refresh decision will be based on the hands-on test rather than this
-provisional assessment.
-
-## Planned hands-on tests
-
-1. Record the installed Power BI Desktop version.
-2. Confirm that Power BI Desktop opens and operates correctly through
-   Parallels.
-3. Confirm Power BI service sign-in and record the current license type.
-4. Confirm whether My workspace is available.
-5. Define and apply versioned least-privilege PostgreSQL access.
-6. Verify that the BI login cannot access `staging`.
-7. Verify that the BI login cannot modify database data or objects.
-8. Query:
-
-   * `analytics.vw_reporting_cutoff`;
-   * `reporting.vw_monthly_paid_movement`; and
-   * `reporting.vw_campaign_incremental_performance`.
-9. Confirm usable Power BI data types and acceptable query behavior.
-10. Confirm that the database session and connectivity test cause zero writes.
-11. Connect Power BI Desktop to PostgreSQL from Windows in Parallels.
-12. Build a minimal Import-mode semantic model containing only approved data.
-13. Publish one minimal disposable report to the Power BI service.
-14. Test the account's Publish to web availability and document any license,
-    tenant, or administrator restriction.
-15. Test Power BI Desktop refresh.
-16. Test Power BI service manual refresh if a supported secure connection is
-    available.
-17. Determine whether scheduled refresh requires an always-on gateway.
-18. Inspect public access, underlying-data exposure, stored credentials, and
-    refresh settings.
-19. Delete the disposable report, semantic model, embed code, connection, and
-    test credentials unless they are intentionally retained by the final
-    design.
+1. Power BI Desktop `2.157.879.0`, 64-bit (August 2026), opened and operated
+   correctly through Parallels.
+2. The guarded database-access runner created and verified the reusable
+   `marketing_analytics_bi_reader` `NOLOGIN` role against the confirmed
+   `guitar_analytics` database.
+3. A separate operational login inherited the role, defaulted to read-only
+   transactions, read the approved objects, and was denied staging access and
+   persistent writes.
+4. Representative approved queries returned one reporting-cutoff row, 53,567
+   monthly-movement rows, and 32 campaign-incremental rows.
+5. Power BI Desktop connected to PostgreSQL from Windows through the existing
+   `/32`, preserved verified TLS, imported usable PostgreSQL types, rendered a
+   minimal report, and completed a manual refresh.
+6. The remaining approved objects were imported into the canonical working
+   PBIX before relocation, and every loaded table was verified as Import mode.
+7. The dedicated Fabric Free identity accessed `My workspace` and published
+   the disposable report and semantic model.
+8. The restricted Publish-to-web tenant setting allowed that identity to
+   create a new embed code without Pro or PPU.
+9. The public URL rendered anonymously in an incognito browser, and the report
+   remained interactive inside a local iframe.
+10. Public-view options were inspected; only approved synthetic test content
+    was observed.
+11. Service-side database refresh was deliberately not configured. The static
+    Import design avoids a gateway, scheduled refresh, service credentials,
+    DirectQuery, and broadened RDS access.
+12. The disposable public artifacts are intentionally retained only until the
+    final portfolio report replaces them, at which point their embed code,
+    report, and semantic model must be deleted.
 
 ## Spike deliverables
 
-The completed spike will produce:
+The completed spike produced:
 
 * this platform and connectivity decision document;
 * versioned least-privilege PostgreSQL access SQL;
@@ -308,31 +314,34 @@ The completed spike will produce:
 * a minimal disposable Power BI artifact;
 * publication and refresh findings;
 * an updated `ARCHITECTURE.md`;
-* a documented final refresh decision; and
+* a documented static Import refresh decision; and
 * exact instructions for the following semantic-model milestone.
 
 ## Final result
 
-To be completed after the hands-on tests.
+The spike is complete. Power BI is viable for this Mac-based public portfolio:
+Desktop authoring works through Parallels, RDS access remains restricted to one
+public IPv4 `/32`, the dedicated login is least-privilege, verified TLS and
+manual Desktop refresh work, and the approved data is stored in Import mode.
 
-The final result will record:
+An independently controlled Fabric Free tenant can publish the disposable
+Import report from `My workspace`, create a Publish-to-web code, serve the
+report anonymously, and render it interactively in an iframe. A Power BI Pro
+purchase is not required for the tested path. The final design therefore uses
+a manually refreshed and republished static snapshot with no gateway,
+scheduled service refresh, DirectQuery, service-side RDS credentials, paid
+Fabric capacity, or broadened database ingress.
 
-* the tested Power BI Desktop and Power BI service versions or account state;
-* the selected connection path;
-* the verified database privileges;
-* the selected storage mode;
-* the publication result;
-* the refresh result;
-* any license or tenant limitation;
-* costs and operational dependencies;
-* rejected alternatives;
-* removed disposable resources; and
-* unresolved limitations.
+The known-working disposable publication remains active temporarily for
+reference and must be removed when the final report replaces it. The next
+milestone will build and reconcile the canonical semantic model and report
+from the already imported sources.
 
 ## Exact next semantic-model work
 
-The semantic-model milestone will begin only after this spike proves a
-supported secure path.
+The semantic-model milestone is now the next task. It will use the approved
+objects already stored in the canonical Import PBIX and will not require an
+immediate RDS refresh.
 
 The planned semantic model will contain:
 
@@ -347,8 +356,14 @@ The planned semantic model will contain:
 * no duplicated report-page business logic; and
 * reconciliation measures and queries that match reviewed PostgreSQL results.
 
-The eventual report will remain thin. PostgreSQL will continue to own source
-cleaning, deterministic row selection, eligibility, attribution, cohort,
-churn, experiment, CLV, and data-quality rules. Power BI will own
-filter-context-dependent aggregation, presentation, and interaction.
+The eventual report will remain logically thin: it will not duplicate stable
+business rules already owned by PostgreSQL or the canonical Power BI model.
+Before physically separating the report from the semantic model, test that the
+exact configuration remains compatible with Publish to web. Keeping the model
+and report together in one canonical PBIX remains acceptable if needed for the
+public-publication path.
 
+PostgreSQL will continue to own source cleaning, deterministic row selection,
+eligibility, attribution, cohort, churn, experiment, CLV, and data-quality
+rules. Power BI will own filter-context-dependent aggregation, presentation,
+and interaction.

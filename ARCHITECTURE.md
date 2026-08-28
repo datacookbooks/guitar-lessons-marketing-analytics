@@ -18,7 +18,9 @@ flowchart TD
     F --> G["RDS PostgreSQL<br/>source-shaped staging"]
     G --> H["RDS PostgreSQL<br/>typed analytics models"]
     H --> I["Reporting views<br/>implemented and validated"]
-    I --> J["BI dashboard<br/>planned"]
+    I --> J["Least-privilege Power BI access<br/>verified TLS + Import mode"]
+    J --> K["Power BI service<br/>static public snapshot"]
+    K --> L["Anonymous website iframe<br/>publication path validated"]
 ```
 
 The source API lives in a separate repository. This analytics repository owns
@@ -149,7 +151,8 @@ guitar-lessons-marketing-analytics/
 │   ├── run_historical_staging_load.py
 │   ├── run_incremental_load.py
 │   ├── run_analytics_transform.py
-│   └── run_reporting_views.py
+│   ├── run_reporting_views.py
+│   └── run_bi_access.py
 ├── sql/
 │   ├── schema/
 │   │   ├── 001_create_schemas.sql
@@ -160,12 +163,15 @@ guitar-lessons-marketing-analytics/
 │   │   └── 002_transform_staging_to_analytics.sql
 │   ├── analytics_views/
 │   │   └── 001_create_reporting_helper_views.sql
-│   └── reporting_views/
-│       └── 001_create_reporting_views.sql
+│   ├── reporting_views/
+│   │   └── 001_create_reporting_views.sql
+│   └── bi_access/
+│       └── 001_create_bi_reader_role.sql
 ├── docs/
 │   ├── data_dictionary.md
 │   ├── analytics_cleaning_contract.md
-│   └── metric_definitions.md
+│   ├── metric_definitions.md
+│   └── dashboard_platform_decision.md
 ├── tests/
 │   └── integration/
 ├── dashboard/screenshots/
@@ -192,6 +198,29 @@ daily rows, 32 incremental measurement windows, and 5,848 quality issues. A
 second unchanged-input application produced identical view definitions and
 reconciled exactly.
 
+The Power BI connectivity and publication spike then validated the dashboard
+delivery path. A versioned `marketing_analytics_bi_reader` `NOLOGIN` role
+grants only the approved analytics dimensions and reporting views. A separate
+operational login inherits that role, defaults to read-only transactions, and
+was verified to be unable to read staging or persist source changes.
+
+Power BI Desktop `2.157.879.0`, 64-bit (August 2026), runs through Parallels.
+It connected to RDS through the existing single-public-IP `/32` using verified
+TLS after the official Amazon RDS `us-east-1` CA bundle was installed in the
+Windows trusted-root store. A manual Desktop refresh succeeded. The remaining
+approved BI objects were imported into the canonical working PBIX before a
+temporary relocation, and every loaded table was confirmed as Import mode.
+
+An independently controlled Microsoft Entra tenant provides a dedicated
+Fabric Free identity and restricts Publish-to-web creation to the security
+group `Power BI Publish to Web Creators`. A disposable report and semantic
+model were published to `My workspace`; the Fabric Free identity created a
+public embed code without Pro or PPU. The public URL rendered without sign-in
+in an incognito browser, and the report remained interactive inside a local
+HTML iframe. The disposable public artifacts are retained temporarily as a
+known-working reference and must be removed when the final portfolio report
+replaces them.
+
 ## 7. Current and deferred workflow
 
 The API generation schedule is implemented in GitHub Actions. Historical and
@@ -199,19 +228,29 @@ incremental extraction/loading, analytics transformation, and validation are
 currently deliberate manual commands. This keeps failure handling observable
 while dashboard connectivity and modeling are evaluated.
 
+The final public Power BI artifact will be a manually refreshed static Import
+snapshot. The Power BI service does not require a gateway, scheduled refresh,
+database credentials, DirectQuery, continuous RDS availability, or broader
+database ingress. Model and report work can continue offline from the saved
+PBIX as long as no source refresh or source-dependent Power Query change is
+triggered.
+
 Automatic downstream scheduling has not been selected or implemented. Earlier
 plans mentioned Lambda and EventBridge, but those are options rather than
 current infrastructure. Scheduling should be chosen only after the reporting
-layer, dashboard connectivity, and end-to-end manual workflow are complete.
+layer, final semantic model, dashboard, and end-to-end manual workflow are
+complete.
 
 ## 8. Remaining build order
 
-1. Select Tableau Public or Power BI and prove secure PostgreSQL connectivity
-   plus the intended refresh path.
-2. Build one standardized semantic model with explicit relationships, a date
-   table, documented measures, formats, and hidden technical fields.
-3. Build a thin report and dashboard against that shared model, reconcile its
-   important measures to SQL, and capture repository screenshots.
+1. Select Power BI and prove secure PostgreSQL connectivity, Import refresh,
+   Fabric Free publication, anonymous public access, and iframe behavior.
+   **Complete.**
+2. Build one standardized Import semantic model with explicit relationships,
+   a date table, documented measures, formats, and hidden technical fields.
+3. Build a logically thin report against that canonical model, verify the final
+   configuration remains compatible with Publish to web, reconcile important
+   measures to SQL, and capture repository screenshots.
 4. Finish employer-facing setup and documentation.
 5. Decide whether and how to schedule the downstream pipeline.
 
@@ -227,8 +266,18 @@ layer, dashboard connectivity, and end-to-end manual workflow are complete.
 - Dashboard queries read stable `reporting` views rather than reproducing
   metric definitions in the visualization layer.
 
-## 10. Decisions still open
+## 10. Current dashboard decisions and open questions
 
-- Tableau Public or Power BI for the dashboard;
-- reporting-view refresh and dashboard publication approach;
-- exact downstream scheduling mechanism and timing.
+- Power BI is selected; Desktop runs through Parallels and reads RDS only from
+  the authorized public IPv4 `/32`.
+- The public report uses a manually refreshed static Import snapshot and
+  Publish to web from the independently controlled Fabric Free tenant.
+- No Pro purchase, gateway, scheduled service refresh, service-side RDS
+  credentials, DirectQuery, paid Fabric capacity, or broadened RDS ingress is
+  required for the tested path.
+- The next milestone must decide the final relationships, date table, shared
+  DAX measures, formats, descriptions, and hidden fields.
+- A physically separate thin report will be adopted only if the exact
+  configuration is verified as Publish-to-web compatible; one canonical PBIX
+  containing the model and report is an acceptable fallback.
+- The exact downstream scheduling mechanism and timing remain deferred.
