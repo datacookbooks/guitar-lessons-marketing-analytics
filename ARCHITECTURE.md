@@ -4,7 +4,8 @@ This employer-facing portfolio project turns intentionally messy synthetic
 marketing and subscription data into trustworthy PostgreSQL models. It
 demonstrates Python extraction and loading, a replayable S3 raw layer, typed
 SQL transformations, explicit data-quality handling, and reusable reporting
-metrics. The BI semantic model and dashboard are the next milestone.
+metrics. The standardized Power BI semantic model is implemented and
+validated; the polished report is the current milestone.
 
 ## 1. Implemented architecture
 
@@ -19,8 +20,10 @@ flowchart TD
     G --> H["RDS PostgreSQL<br/>typed analytics models"]
     H --> I["Reporting views<br/>implemented and validated"]
     I --> J["Least-privilege Power BI access<br/>verified TLS + Import mode"]
-    J --> K["Power BI service<br/>static public snapshot"]
-    K --> L["Anonymous website iframe<br/>publication path validated"]
+    J --> K["Canonical Power BI model<br/>16 Import tables + 15 measures"]
+    K --> L["Logically thin report<br/>current milestone"]
+    L --> M["Power BI service<br/>static public snapshot"]
+    M --> N["Anonymous website iframe<br/>publication path validated"]
 ```
 
 The source API lives in a separate repository. This analytics repository owns
@@ -171,10 +174,17 @@ guitar-lessons-marketing-analytics/
 │   ├── data_dictionary.md
 │   ├── analytics_cleaning_contract.md
 │   ├── metric_definitions.md
-│   └── dashboard_platform_decision.md
+│   ├── dashboard_platform_decision.md
+│   └── power_bi_semantic_model.md
 ├── tests/
 │   └── integration/
 ├── dashboard/screenshots/
+│   ├── FullModelView.png
+│   ├── ModelLeftToRight_Part1.png
+│   ├── ModelLeftToRight_Part2.png
+│   ├── ModelLeftToRight_Part3.png
+│   ├── PowerBIModelValidationSummary.png
+│   └── PowerBIIncrementalityValidation.png
 └── infra/
 ```
 
@@ -221,6 +231,22 @@ HTML iframe. The disposable public artifacts are retained temporarily as a
 known-working reference and must be removed when the final portfolio report
 replaces them.
 
+The canonical Power BI model is also complete. It contains 16 Import tables,
+22 many-to-one single-direction relationships (21 active and one inactive), a
+marked 1,096-row `Date` table, a 12-row `Paid Tenure Month` dimension, and 15
+visible valid measures in `Shared Measures`. Automatic date/time is disabled.
+Technical keys, lineage, duplicated dimension attributes, unsafe SQL rates,
+and non-additive paid-CLV components are hidden from ordinary report
+construction.
+
+Final filter tests reconciled Date/Campaign daily rows, 41,458 opening paid
+exposures, 2,664 churned customers, 45,261 retention-eligible checkpoints,
+and 29,782 retained checkpoints. Missing-spend guardrails returned blank for
+incomplete selections; spend-complete selections reconciled to $228.22898
+incremental CAC, 0.1498596 incremental 90-day ROAS, and -91.09694% incremental
+90-day ROI. The model contract and screenshots are recorded in
+`docs/power_bi_semantic_model.md`.
+
 ## 7. Current and deferred workflow
 
 The API generation schedule is implemented in GitHub Actions. Historical and
@@ -248,6 +274,7 @@ complete.
    **Complete.**
 2. Build one standardized Import semantic model with explicit relationships,
    a date table, documented measures, formats, and hidden technical fields.
+   **Complete.**
 3. Build a logically thin report against that canonical model, verify the final
    configuration remains compatible with Publish to web, reconcile important
    measures to SQL, and capture repository screenshots.
@@ -275,8 +302,9 @@ complete.
 - No Pro purchase, gateway, scheduled service refresh, service-side RDS
   credentials, DirectQuery, paid Fabric capacity, or broadened RDS ingress is
   required for the tested path.
-- The next milestone must decide the final relationships, date table, shared
-  DAX measures, formats, descriptions, and hidden fields.
+- The canonical 16-table Import model, relationships, date and tenure
+  dimensions, 15 shared measures, presentation metadata, and validation
+  evidence are complete. The polished logically thin report is next.
 - A physically separate thin report will be adopted only if the exact
   configuration is verified as Publish-to-web compatible; one canonical PBIX
   containing the model and report is an acceptable fallback.

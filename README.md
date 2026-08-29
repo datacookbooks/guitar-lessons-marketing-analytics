@@ -13,8 +13,11 @@ performance, and data quality.
 The source API, historical extraction, private S3 archive, PostgreSQL staging
 contract, secured RDS instance, historical and incremental staging loads,
 cleaned typed analytics layer, metric contracts, and tested reporting views
-are complete. The next phase selects the dashboard platform, proves secure
-connectivity and refresh behavior, and builds the shared semantic model.
+are complete. Power BI connectivity, Fabric Free anonymous publication, and
+the standardized 16-table Import semantic model are also implemented and
+validated. The current phase builds the logically thin portfolio report,
+reconciles its visuals, and replaces the disposable public iframe with the
+final static snapshot.
 
 ## Historical staging load
 
@@ -143,3 +146,5 @@ later incremental analytics load.
 - [Source and staging data dictionary](docs/data_dictionary.md)
 - [Analytics cleaning contract](docs/analytics_cleaning_contract.md)
 - [Metric definitions and semantic-model contract](docs/metric_definitions.md)
+- [Implemented Power BI semantic model](docs/power_bi_semantic_model.md)
+- [Dashboard platform and publication decision](docs/dashboard_platform_decision.md)
