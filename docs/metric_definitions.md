@@ -1,15 +1,37 @@
 # Reporting metric definitions
 
+Last updated: 2026-08-29
+
 ## Purpose and status
 
-This document is the contract for the analytics helper views, dashboard-facing
-reporting views, and eventual BI semantic model. It is written before the views
-so implementation and validation can be reviewed against stable business rules.
+This document is the authoritative contract for the implemented analytics
+helper views, dashboard-facing reporting views, and canonical Power BI Import
+semantic model. It began as a design-before-implementation contract and has now
+been reconciled to the live SQL reporting layer and the implemented Power BI
+model.
 
 The live source profile was executed through a PostgreSQL read-only transaction
 against the reviewed analytics snapshot. All core business sources cover
 2024-01-01 through 2026-08-25. August 2026 and measurement window `2026_Q3` are
 in progress and must not be presented as complete periods.
+
+Current Power BI implementation status:
+
+- The canonical model contains 16 Import tables. Automatic date/time is
+  disabled and no automatic local date tables remain.
+- The marked `Date` table contains 1,096 unique dates from 2024-01-01 through
+  2026-12-31. Its cutoff flags identify 2026-08-25 as the latest available
+  date and 2026-07-31 as the latest complete-month date.
+- The dedicated `Paid Tenure Month` table contains months 1 through 12.
+- The model has 22 many-to-one, single-direction relationships: 21 active and
+  one inactive. It has no many-to-many or bidirectional relationships.
+- The `Shared Measures` table contains 15 explicit, visible DAX measures. All
+  have reviewed folders, formats, descriptions, and metadata state `1`
+  (`Ready`).
+- The measure calculations and important additive components have been
+  reconciled to the reviewed reporting snapshot. Final report-facing field
+  naming and formatting remains a semantic-model presentation task, not a
+  change to the metric contracts below.
 
 ## Profile findings that constrain the design
 
@@ -127,8 +149,8 @@ are first reduced to one assignment.
 | Aggregation class | Churned customers and opening customer-month exposures are additive across mutually exclusive slices. The rate is non-additive and must be recomputed. Opening/closing snapshots are semi-additive across time. |
 | Permitted rollups | Sum numerator and denominator across compatible months and mutually exclusive segment rows, then divide. Never average monthly rate columns. For a point-in-time customer count, use the latest selected snapshot rather than summing months. |
 | SQL responsibility | Establish opening eligibility, classify events, restrict numerator to the opening population, create segment keys, and expose numerator/denominator plus exact-grain rate |
-| Intended DAX | `[Paid Churn Rate] = DIVIDE(SUM([churned_paid_customers]), SUM([opening_paid_customers]))`; percentage, two decimals. `[Opening Paid Customers Snapshot]` uses the latest visible `month_start`. |
-| Semantic-model source / relationships | `reporting.vw_monthly_paid_movement`; many-to-one to Date by `month_start`, Plan by `opening_plan_id`, Campaign by `first_campaign_id`, and approved customer-segment dimensions |
+| Intended DAX / implemented Power BI behavior | `[Paid Churn Rate]` divides summed churned customers by summed opening exposures. `[Opening Paid Customers Snapshot]` uses only the latest visible `month_start`. See the final shared-measure catalog for formats and descriptions. |
+| Semantic-model source / relationships | `Monthly Paid Movement` from `reporting.vw_monthly_paid_movement`; active many-to-one relationships to `Date` by `month_start`, `Plan` by `opening_plan_id`, and `Campaign` by `first_campaign_id`. The alternate relationship from `paid_cohort_month` to `Date[Date]` is inactive. Customer segments remain attributes on the reporting table. |
 
 ### 2. Upgrades, downgrades, reactivations, and paid snapshots
 
@@ -141,8 +163,8 @@ are first reduced to one assignment.
 | Null and edge treatment | Same-instant Free-to-paid is a conversion, not reactivation. Same-instant Pro/Master movement is upgrade/downgrade. Multiple legitimate movements are separate events; distinct-customer measures remain non-additive. |
 | Aggregation class / rollups | Event counts are additive. Distinct customers and snapshots are non-additive or semi-additive. Rates recompute from components. |
 | SQL responsibility | Sequence plan periods with `LAG`/`LEAD`, classify exact transitions and positive gaps, and expose from/to keys and components |
-| Intended DAX | Sum event components; use `DISTINCTCOUNT` only on helper keys when a distinct-customer visual is required. Snapshot measure uses the latest visible date. |
-| Semantic-model source / relationships | Monthly movement view to Date and two role-playing Plan relationships (`from_plan_id`, `to_plan_id`); only the active relationship required by a visual is used |
+| Intended DAX / current Power BI behavior | Upgrade, downgrade, and reactivation components remain additive report fields. No separate event-count measures are currently implemented. The explicit opening snapshot measure uses the latest visible month. Add any future distinct-customer measure from an appropriate stable helper key rather than summing monthly distinct counts. |
+| Semantic-model source / relationships | The implemented `Monthly Paid Movement` view relates actively to `Date` by `month_start` and to `Plan` by `opening_plan_id`. Upgrade, downgrade, and reactivation event components remain additive reporting fields; no unimplemented from-plan/to-plan relationship should be assumed. |
 
 ### 3. Paid-cohort retention
 
@@ -157,8 +179,8 @@ are first reduced to one assignment.
 | Aggregation class | Eligible and retained counts are additive across mutually exclusive segments for one checkpoint. Retention rate is non-additive. The same customers recur across checkpoints, so counts must not be summed across `month_number`. |
 | Permitted rollups | Recompute from summed counts while exactly one checkpoint is selected. Return blank if several checkpoint numbers are selected together. |
 | SQL responsibility | Define first-paid cohort, exact anniversaries, maturity, active paid state, segment keys, and count components |
-| Intended DAX | `[Paid Cohort Retention Rate] = IF(HASONEVALUE([month_number]), DIVIDE(SUM([retained_customers]), SUM([eligible_customers])))`; percentage, two decimals |
-| Semantic-model source / relationships | `reporting.vw_paid_cohort_retention`; Date relationship to `cohort_month`; Plan to `initial_paid_plan_id`; disconnected or dedicated tenure-checkpoint dimension for `month_number` |
+| Intended DAX / implemented Power BI behavior | `[Paid Cohort Retention Rate]` requires exactly one `Paid Tenure Month`, then divides summed retained customers by summed eligible customers; otherwise it returns blank. |
+| Semantic-model source / relationships | `Paid Cohort Retention` from `reporting.vw_paid_cohort_retention`; active relationships to `Date` by `paid_cohort_month`, `Plan` by `initial_paid_plan_id`, `Campaign` by `first_campaign_id`, and `Paid Tenure Month` by `month_number`. |
 
 ### 4. Payment-failure recovery
 
@@ -172,8 +194,8 @@ are first reduced to one assignment.
 | Null and edge treatment | Failed events are not revenue. Several failed attempts in one episode contribute one denominator. One successful retry recovers one episode. Missing timestamps make an episode ineligible and measurable as a quality exception. |
 | Aggregation class / rollups | Failed and recovered episode counts are additive because each episode appears once. Recovery rate is non-additive and recomputed from totals. |
 | SQL responsibility | Sequence attempts, assign episode numbers, select first failure and first later success, calculate recovery hours, and expose the seven-day flag |
-| Intended DAX | `[Payment Recovery Rate] = DIVIDE(SUM([recovered_episodes]), SUM([failed_billing_episodes]))`; percentage, two decimals |
-| Semantic-model source / relationships | `reporting.vw_payment_recovery`; Date to `first_failure_date`, Plan by episode plan, Customer dimension for approved slices |
+| Intended DAX / implemented Power BI behavior | `[Payment Recovery Rate]` divides summed recovered episodes by summed failed billing episodes. |
+| Semantic-model source / relationships | `Payment Recovery` from `reporting.vw_payment_recovery`; active relationships to `Date` by `failure_month`, `Plan` by `plan_id`, and `Campaign` by `first_campaign_id`. Approved customer segments remain attributes on the reporting table. |
 
 ### 5. Realized customer contribution value
 
@@ -188,8 +210,8 @@ are first reduced to one assignment.
 | Edge treatment | Same-instant plan transitions use half-open intervals, so cost is allocated once. Refunds do not reverse already incurred service cost. Partial calendar months are prorated; incomplete current-month cost stops at the cutoff. |
 | Aggregation class / rollups | Charges, refunds, service cost, and contribution are additive after reduction to customer-month. Averages and per-customer summaries are non-additive and recomputed. |
 | SQL responsibility | Reduce payments to customer-month, allocate plan cost without overlap, expose reported/effective values and completeness flags, then join the compatible customer-month components |
-| Intended DAX | `[Realized Contribution] = SUM([realized_contribution])`, currency. `[Customers With Imputed Value]` is a distinct count from helper keys and must not be summed across months. |
-| Semantic-model source / relationships | `reporting.vw_customer_value`; many-to-one to Customer and Date by `month_start`; do not directly join campaign daily facts |
+| Intended DAX / implemented Power BI behavior | `[Realized Contribution]` sums the additive customer-month contribution. A separate `Customers With Imputed Value` measure is not currently implemented; if added later, it must use a stable helper key and must not sum monthly distinct counts. |
+| Semantic-model source / relationships | `Customer Value` from `reporting.vw_customer_value`; active relationships to `Date` by `month_start` and `Campaign` by `first_campaign_id`. `customer_id` remains a hidden reporting-grain key; no separate Customer dimension is currently imported. Do not directly join campaign daily facts. |
 
 ### 6. Expected 12-month paid contribution CLV
 
@@ -204,8 +226,8 @@ are first reduced to one assignment.
 | Null and edge treatment | Paid reactivation counts only if active at the anniversary. Plan changes affect the active margin. Segment output is null when any checkpoint has fewer than 30 eligible customers; plan-only fallback remains reportable with its own eligibility counts. The estimate is not realized value. |
 | Aggregation class / rollups | Survival, margin, and CLV are non-additive. Segment CLVs must not be summed or unweighted-averaged. Portfolio CLV uses a weighted average based on the selected new-paid-customer mix. |
 | SQL responsibility | Build customer anniversary inputs, maturity and paid-state flags, segment sample sizes, monthly survival/margin components, and reviewed 12-month estimate |
-| Intended DAX | `[Expected 12M Paid CLV]` uses the SQL segment estimate at one compatible grain; broader selections use `DIVIDE(SUMX(segment, [expected_clv] * [new_paid_weight]), SUM([new_paid_weight]))`; currency |
-| Semantic-model source / relationships | `reporting.vw_expected_12m_paid_clv`; Plan to `initial_paid_plan_id`; acquisition channel/campaign dimensions; tenure component table related through a segment key if exposed |
+| Intended DAX / implemented Power BI behavior | `[Expected 12M Paid CLV]` uses the compatible SQL estimate and a `new_paid_weight` weighted average at broader compatible selections. It never sums or unweighted-averages segment CLVs. |
+| Semantic-model source / relationships | `Expected 12M Paid CLV` from `reporting.vw_expected_12m_paid_clv`; active relationship to `Plan` by `initial_paid_plan_id`. Acquisition channel and segment level remain attributes on the table. `Paid CLV Monthly Component` relates separately to `Plan` and `Paid Tenure Month` and is hidden from ordinary report construction because its raw rates and margins are not safely additive. |
 
 ### 7. Daily campaign delivery and platform attribution
 
@@ -220,7 +242,7 @@ are first reduced to one assignment.
 | Attribution boundary | The platform count is descriptive attribution, not causal lift. The current sources do not contain an auditable customer-level touch key for every campaign, so the project does not invent attributed customer revenue or attributed ROAS from a detail-level fact join. Causal revenue and contribution are reported from assignment experiments. |
 | Aggregation class / rollups | Delivery components are additive. CTR, CPC, and CPA are non-additive and recomputed from summed components. |
 | SQL responsibility | Expose corrected daily components, completeness flags, and exact-day rates |
-| Intended DAX | `[CTR] = DIVIDE(SUM([clicks]), SUM([impressions]))`; `[CPC] = DIVIDE(SUM([spend]), SUM([clicks]))`; `[Platform CPA] = DIVIDE(SUM([spend]), SUM([platform_attributed_conversions]))` |
+| Intended DAX / implemented Power BI behavior | `[CTR]`, `[CPC]`, and `[Platform CPA]` recompute the ratios from summed components and return blank when required selected components are missing or the relevant denominator is zero. |
 | Semantic-model source / relationships | `reporting.vw_campaign_daily_performance`; many-to-one to Date by `metric_date` and Campaign by `campaign_id` |
 
 ### 8. ITT conversion lift, estimated incremental customers, and CAC
@@ -236,8 +258,8 @@ are first reduced to one assignment.
 | Null and edge treatment | Unknown campaigns excluded. Nonexposed treatment assignments remain in treatment. Negative or zero lift is reported, but incremental CAC is null when estimated incremental customers are not positive. In-progress windows are not final. |
 | Aggregation class / rollups | Arm counts and spend are additive across compatible finalized windows. Rates, lift, incremental customers, and CAC are non-additive and recomputed from pooled arm totals. |
 | SQL responsibility | Derive objective-specific outcome, maturity, ITT components, window boundaries, finality, compatible spend, and exact-window calculations |
-| Intended DAX | `[Incremental Conversion Lift] = DIVIDE(SUM([treatment_conversions]), SUM([treatment_eligible])) - DIVIDE(SUM([holdout_conversions]), SUM([holdout_eligible]))`; `[Estimated Incremental Customers] = SUM([treatment_eligible]) * [Incremental Conversion Lift]`; `[Incremental CAC] = DIVIDE(SUM([spend]), [Estimated Incremental Customers])` |
-| Semantic-model source / relationships | Arm and incremental reporting views to Campaign; measurement-window dimension or window-start Date relationship; do not relate the experiment fact directly to campaign daily at detail grain |
+| Intended DAX / implemented Power BI behavior | `[Incremental Conversion Lift]` recomputes pooled treatment minus pooled holdout conversion rates across finalized 30-day windows. `[Estimated Incremental Customers]` applies that lift to pooled treatment eligibility. `[Incremental CAC]` divides spend by positive incremental customers and returns blank when finalized selected windows contain missing spend. |
+| Semantic-model source / relationships | `Campaign Experiment Arm` and `Campaign Incremental Performance` both relate actively to `Campaign` by `campaign_id` and to `Date` by `measurement_window_start`. No separate measurement-window dimension is implemented. Do not relate either experiment table directly to campaign daily detail. |
 
 ### 9. ITT 90-day incremental revenue, ROAS, contribution, and ROI
 
@@ -254,8 +276,8 @@ are first reduced to one assignment.
 | Null and edge treatment | Require a final window, positive spend, both arms, and mature value outcomes. Negative incremental values remain visible. Missing/imputed payment counts are exposed. No detail fact-to-fact join is allowed. |
 | Aggregation class / rollups | Revenue, contribution, eligible assignments, and spend components are additive only after assignment/window reduction. Means, lifts, ROAS, and ROI are non-additive and recomputed from compatible pooled totals. |
 | SQL responsibility | Build one assignment outcome row, aggregate each arm, aggregate daily spend independently to campaign/window, then join the two window-grain results |
-| Intended DAX | `[Incremental ROAS 90D] = DIVIDE([Estimated Incremental Revenue 90D], SUM([spend]))`; `[Incremental ROI 90D] = DIVIDE([Estimated Incremental Contribution 90D] - SUM([spend]), SUM([spend]))`; percentage, two decimals |
-| Semantic-model source / relationships | `reporting.vw_campaign_incremental_performance`; Campaign and measurement-window dimensions only; value and campaign-daily details remain separate facts |
+| Intended DAX / implemented Power BI behavior | `[Incremental ROAS 90D]` recomputes incremental revenue from pooled treatment/holdout 90-day components and divides by spend. `[Incremental ROI 90D]` analogously recomputes incremental contribution, subtracts spend, and divides by spend. Both require finalized 90-day windows and return blank when required spend is missing or nonpositive. |
+| Semantic-model source / relationships | `Campaign Incremental Performance` from `reporting.vw_campaign_incremental_performance`; active relationships to `Campaign` by `campaign_id` and `Date` by `measurement_window_start`. Value and campaign-daily details remain separate facts. |
 
 ### 10. Data quality
 
@@ -268,35 +290,82 @@ are first reduced to one assignment.
 | Null and edge treatment | Superseded and exact-duplicate deliveries remain reportable. Unknown campaign assignments are included here even though excluded from named-campaign metrics. |
 | Aggregation class / rollups | Issue records are additive across disjoint categories. Distinct impacted rows and any rates are non-additive and recomputed. |
 | SQL responsibility | Aggregate the centralized issue table without hiding selected-delivery status or distinct-row components |
-| Intended DAX | Sum issue records. Use `DISTINCTCOUNT` on a stable composite raw-row key for impacted rows. Any rate uses an explicitly matched source denominator. |
-| Semantic-model source / relationships | `reporting.vw_data_quality`; small Source Table and Issue Code dimensions; Date only when detected-date analysis is meaningful |
+| Intended DAX / current Power BI behavior | No explicit data-quality measures are currently implemented. `issue_records` is additive across disjoint categories. `impacted_raw_rows` must not be summed across potentially overlapping issue categories; any future distinct-row measure requires a stable raw-row key at a compatible grain. No universal issue rate is allowed. |
+| Semantic-model source / relationships | `Data Quality` from `reporting.vw_data_quality` is currently a standalone reporting-grain table. Source table, issue code, selected-delivery flag, and detection timestamps remain report-facing attributes; no separate Source Table, Issue Code, or Date relationship is implemented. |
 
-## Shared semantic-model measure catalog
+## Final Power BI shared-measure catalog
 
-| Measure | Format | Aggregation behavior |
-|---|---|---|
-| `Paid Churn Rate` | Percentage, 2 decimals | Sum churned opening customers / sum opening paid exposures |
-| `Opening Paid Customers Snapshot` | Whole number | Latest visible monthly snapshot; never sum over time |
-| `Paid Cohort Retention Rate` | Percentage, 2 decimals | Recompute for exactly one anniversary month number |
-| `Payment Recovery Rate` | Percentage, 2 decimals | Sum recovered episodes / sum failed episodes |
-| `Realized Contribution` | Currency | Sum additive customer-month contribution |
-| `Expected 12M Paid CLV` | Currency | Compatible segment estimate or weighted average; never unweighted average |
-| `CTR` | Percentage, 2 decimals | Sum clicks / sum impressions |
-| `CPC` | Currency | Sum spend / sum clicks |
-| `Platform CPA` | Currency | Sum spend / sum platform-attributed conversions |
-| `Incremental Conversion Lift` | Percentage points, 2 decimals | Pooled treatment rate minus pooled holdout rate |
-| `Estimated Incremental Customers` | Decimal, 1 decimal | Treatment eligible assignments multiplied by recomputed lift |
-| `Incremental CAC` | Currency | Spend / positive estimated incremental customers |
-| `Incremental ROAS 90D` | Decimal, 2 decimals | Estimated incremental revenue / spend |
-| `Incremental ROI 90D` | Percentage, 2 decimals | (Estimated incremental contribution - spend) / spend |
+The measures below are implemented in the `Shared Measures` table. The exact
+DAX source is stored in the canonical PBIX; this document records the
+authoritative calculation behavior that the expression must preserve. Source
+columns may be hidden from report construction without affecting these
+measures.
 
-These measures belong in one shared semantic model if Power BI is selected.
-Report pages may format and display them but must not reimplement cohort,
-eligibility, conversion, attribution, value-window, or experiment rules.
+| Measure | Display folder | Exact format string | Implemented calculation contract |
+|---|---|---|---|
+| `Data Through Date` | — | `MMM d, yyyy` | Latest imported `Reporting Cutoff[data_through_date]`; communicates snapshot currency and is not the current system date. |
+| `Paid Churn Rate` | Customer Lifecycle | `0.00%;-0.00%;0.00%` | Sum churned paid customers divided by sum opening paid-customer exposures in the current context. Never average the SQL rate column. |
+| `Opening Paid Customers Snapshot` | Customer Lifecycle | `#,0` | Sum opening paid customers only at the latest visible `month_start`; never sum snapshots across selected months. |
+| `Paid Cohort Retention Rate` | Customer Lifecycle | `0.00%;-0.00%;0.00%` | When exactly one `Paid Tenure Month` is selected, sum retained customers divided by sum eligible customers. Return blank when zero or multiple tenure checkpoints are combined. |
+| `Payment Recovery Rate` | Billing | `0.00%;-0.00%;0.00%` | Sum recovered billing episodes divided by sum failed billing episodes. Several failed attempts within one episode remain one denominator episode. |
+| `Expected 12M Paid CLV` | Customer Value | `$#,0.00;($#,0.00);$#,0.00` | Weighted average of the compatible SQL CLV estimates using `new_paid_weight`. Use the appropriate plan or plan-and-channel segment grain and never take an unweighted average or sum of segment CLVs. |
+| `Realized Contribution` | Customer Value | `$#,0.00;($#,0.00);$#,0.00` | Sum additive customer-month realized contribution after payment/refund handling and prorated service cost. |
+| `CTR` | Campaign Delivery | `0.00%;-0.00%;0.00%` | Sum clicks divided by sum impressions. Return blank when selected rows contain missing required click data or the denominator is zero. |
+| `CPC` | Campaign Delivery | `$#,0.00;($#,0.00);$#,0.00` | Sum spend divided by sum clicks. Return blank when required click or spend data is missing or clicks are zero. |
+| `Platform CPA` | Campaign Delivery | `$#,0.00;($#,0.00);$#,0.00` | Sum spend divided by sum platform-attributed conversions. Return blank when required spend is missing or attributed conversions are zero. This is descriptive attribution, not causal lift. |
+| `Incremental Conversion Lift` | Campaign Incrementality | `0.00%;-0.00%;0.00%` | For finalized 30-day ITT windows, recompute the pooled treatment conversion rate and subtract the pooled holdout conversion rate. |
+| `Estimated Incremental Customers` | Campaign Incrementality | `0.0` | Pooled treatment-eligible assignments multiplied by recomputed incremental conversion lift for finalized 30-day ITT windows. Negative results remain visible. |
+| `Incremental CAC` | Campaign Incrementality | `$#,0.00;($#,0.00);$#,0.00` | Final-window campaign spend divided by positive estimated incremental customers. Return blank if a selected finalized 30-day window has missing spend or incremental customers are not positive. |
+| `Incremental ROAS 90D` | Campaign Incrementality | `0.00` | Recomputed estimated incremental 90-day revenue divided by campaign spend across compatible finalized 90-day ITT windows. Return blank if required spend is missing or nonpositive. |
+| `Incremental ROI 90D` | Campaign Incrementality | `0.00%;-0.00%;0.00%` | Recomputed estimated incremental 90-day contribution minus campaign spend, divided by campaign spend, across compatible finalized 90-day ITT windows. Return blank if required spend is missing or nonpositive. |
+
+### Final measure descriptions
+
+| Measure | Description stored in the semantic model |
+|---|---|
+| `Data Through Date` | Latest source date included in the imported reporting snapshot. Conveys how recent the data in the report is. |
+| `Paid Churn Rate` | Percentage of customers paying at the start of the selected month or months who left paid service, either by cancelling or by switching to the free tier. Recomputed from total churned customers and opening paid-customer exposures; excludes changes from one paid tier to another. Results for incomplete months are provisional and should not be treated as final. |
+| `Opening Paid Customers Snapshot` | Number of paid customers at the opening of the latest visible month. Uses the latest selected monthly snapshot rather than summing snapshots over time. |
+| `Paid Cohort Retention Rate` | Percentage of customers still on a paid plan at the selected number of months after they first became paying customers. Only customers who have reached that checkpoint are included. Requires exactly one tenure month and otherwise returns blank. |
+| `Payment Recovery Rate` | Percentage of failed billing episodes followed by a successful charge within seven days. Multiple failed attempts within one billing episode count once. |
+| `Expected 12M Paid CLV` | Estimated contribution value a new paying customer is expected to generate during their first 12 months, based on observed customer retention and plan margins. This is a forecast, not actual realized value. |
+| `Realized Contribution` | Actual contribution value generated by customers to date, calculated as successful payment revenue minus refunds and estimated service costs, which are prorated. Missing payment amounts are estimated using the applicable plan price when allowed by the documented data rules. |
+| `CTR` | Clicks divided by impressions in the current filter context. Returns blank when required components are missing or impressions are zero. |
+| `CPC` | Campaign spend divided by clicks in the current filter context. Returns blank when required components are missing or clicks are zero. |
+| `Platform CPA` | Average campaign spend per conversion credited by the marketing platform. Calculated as total spend divided by platform-attributed conversions. This reflects the platform's attribution and does not measure how many conversions the campaign actually caused. |
+| `Incremental Conversion Lift` | Estimated change in the 30-day conversion rate caused by the campaign. It compares customers assigned to receive the campaign with a holdout group that was not assigned to receive it. For the current selection, all eligible customers in each group are combined before the two conversion rates are calculated and compared. |
+| `Estimated Incremental Customers` | Estimated number of additional customers who converted because of the campaign, beyond the number expected to convert without it. Calculated by applying the difference between the campaign and holdout conversion rates to the number of customers assigned to the campaign. The result can be negative if the campaign group performed worse than the holdout group. |
+| `Incremental CAC` | Average campaign spend for each additional customer estimated to have converted because of the campaign. Calculated as campaign spend divided by estimated incremental customers. Returns blank when the estimated number of incremental customers is zero or negative, or when required spending data is missing. |
+| `Incremental ROAS 90D` | Estimated additional revenue generated by the campaign during the 90 days after assignment, divided by campaign spend. For example, a value of 1.50 means the campaign generated an estimated $1.50 in additional revenue for every $1.00 spent. This measures revenue rather than profit. |
+| `Incremental ROI 90D` | Estimated return after campaign spend, based on the additional contribution value generated during the 90 days after assignment. Contribution value subtracts estimated variable service costs from revenue; campaign spend is then subtracted before calculating the return percentage. For example, 25% means the campaign produced an estimated $0.25 beyond its cost for every $1.00 spent. |
+
+These measures are the approved shared semantic-model interface. Report pages
+may display and filter them but must not reimplement cohort eligibility,
+conversion, attribution, value-window, churn, CLV, experiment, or data-quality
+rules independently.
+
+## Implemented Power BI validation evidence
+
+All measure metadata returned state `1` (`Ready`). The following validations
+were run against the saved Import snapshot with data through 2026-08-25:
+
+| Subject | Reconciliation result |
+|---|---|
+| Paid churn | 41,458 opening paid-customer exposures; 2,664 churned customers; recomputed rate 6.4257803%. |
+| Opening snapshot | Latest visible snapshot month 2026-08-01; direct value 2,518; measure value 2,518; difference zero. |
+| Paid retention | Combined checkpoints: 45,261 eligible and 29,782 retained; rate correctly blank without one checkpoint. Months 1, 3, 6, and 12 matched direct rates exactly at 90.4238%, 74.7111%, 61.7419%, and 47.8042%. |
+| Payment recovery | 4,109 failed billing episodes; 2,969 recovered episodes; recovery rate 72.2560%. |
+| Expected CLV | Portfolio measure and direct plan-weighted result both $200.3417087; every plan/channel segment matched, aside from negligible floating-point representation. |
+| Realized contribution | 164,574 customer-month rows; $1,982,066 effective charge revenue; -$34,981 effective refunds; $1,023,821.21 prorated service cost; $923,263.79 realized contribution. Difference from the direct calculation was approximately `-1.16e-10`. |
+| Campaign delivery | 2,904 daily rows, 25 missing-click rows, and ten missing-spend rows. CTR 4.1518577%, CPC $1.8842516, and Platform CPA $49.9813179 each matched the direct calculation with zero difference. |
+| 30-day lift | 29 finalized windows; 69,117 treatment eligible; 12,303 holdout eligible; 5,014 treatment conversions; 718 holdout conversions; lift 1.4183908 percentage points; 980.3492 estimated incremental customers. |
+| Incremental CAC | The all-final-window selection correctly returned blank because it contained seven missing spend days. Across 23 spend-complete final windows, $199,974.44 spend / 876.2009 incremental customers = $228.22898 CAC, with zero difference. |
+| 90-day ROAS and ROI | All 26 final windows correctly returned blank because six windows contained seven missing spend days. Across 20 spend-complete final windows, ROAS was 0.1498596 and ROI was -91.09694%, each matching the direct calculation with zero difference. |
 
 ## Required validation queries and tests
 
-Implementation is not accepted until tests prove all of the following:
+The SQL helper/reporting implementation and the shared-measure calculations
+were accepted only after tests and live reconciliation proved the following:
 
 1. Helper-view business keys are unique at their declared grains.
 2. No customer has more than one opening paid state in a month.
@@ -324,3 +393,23 @@ Implementation is not accepted until tests prove all of the following:
     campaign/window before joining; dollars cannot multiply.
 16. Every SQL artifact is schema-qualified, denominator-safe, replaceable, and
     free of destructive statements.
+
+## Remaining semantic-model acceptance work
+
+The metric logic itself is implemented and reconciled. Before declaring the
+entire semantic-model milestone complete:
+
+1. Finish friendly field names, display formats, and default summarization on
+   the remaining visible reporting fields.
+2. Rerun the column inventory and confirm technical keys, duplicated dimension
+   labels, unsafe SQL rates, lineage fields, `Reporting Cutoff`, and raw paid-
+   CLV components remain hidden from ordinary report construction.
+3. Confirm the final topology remains 16 Import tables, 22 relationships, 21
+   active relationships, one inactive relationship, and no many-to-many or
+   bidirectional relationships.
+4. Test representative Date/Campaign, Date/Plan, tenure/retention, and complete-
+   versus-missing-spend slicer combinations for blank leakage, duplicated
+   totals, invalid cross-filtering, and guardrail behavior.
+5. Save the validated canonical PBIX and a separate post-validation backup
+   outside Git, then capture the final model diagram and reconciliation
+   evidence for repository documentation.
