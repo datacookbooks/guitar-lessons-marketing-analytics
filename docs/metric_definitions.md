@@ -124,6 +124,7 @@ are first reduced to one assignment.
 
 | Reporting view | Declared grain | Additive components exposed |
 |---|---|---|
+| `reporting.vw_new_paid_customers_monthly` | First-paid month, initial acquisition channel, first campaign, and initial paid plan | New paid customers |
 | `reporting.vw_monthly_paid_movement` | Month plus opening plan and approved customer segments | Opening paid exposures, churned opening customers, upgrade events, downgrade events, reactivations, closing paid snapshot |
 | `reporting.vw_paid_cohort_retention` | Cohort month, anniversary month number, initial paid plan, and approved acquisition segments | Eligible customers and retained paid customers |
 | `reporting.vw_payment_recovery` | Failure month, plan, attempt type, and approved customer segments | Failed billing episodes and recovered episodes |
@@ -279,7 +280,21 @@ are first reduced to one assignment.
 | Intended DAX / implemented Power BI behavior | `[Incremental ROAS 90D]` recomputes incremental revenue from pooled treatment/holdout 90-day components and divides by spend. `[Incremental ROI 90D]` analogously recomputes incremental contribution, subtracts spend, and divides by spend. Both require finalized 90-day windows and return blank when required spend is missing or nonpositive. |
 | Semantic-model source / relationships | `Campaign Incremental Performance` from `reporting.vw_campaign_incremental_performance`; active relationships to `Campaign` by `campaign_id` and `Date` by `measurement_window_start`. Value and campaign-daily details remain separate facts. |
 
-### 10. Data quality
+### 10. New paid customers
+
+| Field | Contract |
+|---|---|
+| Business question | How many customers entered paid service for the first time during each month? |
+| Output grain | First-paid month, initial acquisition channel, first campaign, and initial paid plan |
+| Eligible population | Every customer in `analytics.vw_customer_paid_cohort`, exactly once |
+| Date basis | Calendar month containing the customer's first-ever paid-plan start |
+| Null and edge treatment | Registrations without a paid start are excluded. Reactivations and later paid-plan changes are excluded because only the first-ever paid start qualifies. Blank or missing acquisition channels become `Unknown/Unattributed`. Missing first-campaign attribution uses campaign ID `-1`, the approved unknown campaign member. |
+| Aggregation class / rollups | `new_paid_customers` is additive across months and mutually exclusive acquisition, campaign, and initial-plan slices |
+| SQL responsibility | Aggregate the one-row-per-customer paid-cohort helper without joining to repeated subscription events |
+| Intended DAX | `New Paid Customers = SUM('New Paid Customers Monthly'[new_paid_customers])` |
+| Intended semantic-model relationships | `New Paid Customers Monthly` relates to `Date` by `month_start`, `Campaign` by `first_campaign_id`, and `Plan` by `initial_paid_plan_id` |
+
+### 11. Data quality
 
 | Field | Contract |
 |---|---|
