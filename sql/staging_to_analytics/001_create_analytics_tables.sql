@@ -1,5 +1,10 @@
 BEGIN;
 
+-- Additive compatibility migration for the existing staging table. Historical
+-- source objects may leave this nullable until corrected campaign rows arrive.
+ALTER TABLE staging.dim_campaign
+    ADD COLUMN IF NOT EXISTS primary_conversion_event text;
+
 -- Typed analytics tables retain selected source lineage while enforcing the
 -- business keys, domains, and relationships defined by the cleaning contract.
 
@@ -46,6 +51,7 @@ CREATE TABLE IF NOT EXISTS analytics.dim_campaign (
     campaign_name text,
     channel text,
     objective text,
+    primary_conversion_event text,
     active_start_date date,
     active_end_date date,
     default_treatment_share numeric(5, 4),
@@ -83,6 +89,22 @@ CREATE TABLE IF NOT EXISTS analytics.dim_campaign (
     )
 );
 
+ALTER TABLE analytics.dim_campaign
+    ADD COLUMN IF NOT EXISTS primary_conversion_event text;
+
+ALTER TABLE analytics.dim_campaign
+    DROP CONSTRAINT IF EXISTS dim_campaign_primary_conversion_event_known;
+
+ALTER TABLE analytics.dim_campaign
+    ADD CONSTRAINT dim_campaign_primary_conversion_event_known CHECK (
+        primary_conversion_event IS NULL
+        OR primary_conversion_event IN (
+            'registration',
+            'first_paid_start',
+            'unknown'
+        )
+    );
+
 CREATE INDEX IF NOT EXISTS dim_campaign_channel_objective_idx
     ON analytics.dim_campaign (channel, objective);
 
@@ -94,6 +116,7 @@ INSERT INTO analytics.dim_campaign (
     campaign_name,
     channel,
     objective,
+    primary_conversion_event,
     active_start_date,
     active_end_date,
     default_treatment_share,
@@ -108,6 +131,7 @@ VALUES (
     'Unknown Campaign',
     'unknown',
     'unknown',
+    'unknown',
     DATE '1900-01-01',
     NULL,
     0,
@@ -117,6 +141,11 @@ VALUES (
     '__synthetic__'
 )
 ON CONFLICT (campaign_id) DO NOTHING;
+
+UPDATE analytics.dim_campaign
+SET primary_conversion_event = 'unknown'
+WHERE campaign_id = -1
+  AND primary_conversion_event IS NULL;
 
 CREATE TABLE IF NOT EXISTS analytics.dim_customer (
     customer_id bigint PRIMARY KEY,

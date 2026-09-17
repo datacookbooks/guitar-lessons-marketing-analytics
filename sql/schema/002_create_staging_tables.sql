@@ -35,6 +35,7 @@ CREATE TABLE staging.dim_campaign (
     campaign_name text,
     channel text,
     objective text,
+    primary_conversion_event text,
     active_start_date text,
     active_end_date text,
     default_treatment_share text,

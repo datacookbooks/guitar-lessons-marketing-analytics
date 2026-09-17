@@ -26,6 +26,7 @@ SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
         "campaign_name",
         "channel",
         "objective",
+        "primary_conversion_event",
         "active_start_date",
         "active_end_date",
         "default_treatment_share",
@@ -92,6 +93,11 @@ SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
         "first_exposed_at",
         "source_updated_at",
     ),
+}
+
+OPTIONAL_SOURCE_COLUMNS: dict[str, frozenset[str]] = {
+    # Historical raw objects predate this additive campaign field.
+    "dim_campaign": frozenset({"primary_conversion_event"}),
 }
 
 LINEAGE_COLUMNS = (
@@ -283,18 +289,27 @@ def s3_document_to_staging_page(
         actual_columns = set(row)
 
         if actual_columns != expected_column_set:
-            missing = sorted(expected_column_set - actual_columns)
-            unexpected = sorted(actual_columns - expected_column_set)
-            raise StagingPageError(
-                f"Row {row_number} did not match the {table_name} source columns; "
-                f"missing={missing}, unexpected={unexpected}."
+            optional_columns = OPTIONAL_SOURCE_COLUMNS.get(
+                table_name,
+                frozenset(),
             )
+            missing = sorted(
+                expected_column_set - actual_columns - optional_columns
+            )
+            unexpected = sorted(actual_columns - expected_column_set)
+
+            if missing or unexpected:
+                raise StagingPageError(
+                    f"Row {row_number} did not match the "
+                    f"{table_name} source columns; "
+                    f"missing={missing}, unexpected={unexpected}."
+                )
 
         converted = {
             column: (
                 _as_raw_row_id_text(row[column])
                 if column == "_raw_row_id"
-                else _as_business_text(row[column], column)
+                else _as_business_text(row.get(column), column)
             )
             for column in expected_columns
         }

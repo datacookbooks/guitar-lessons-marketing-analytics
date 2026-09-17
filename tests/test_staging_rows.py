@@ -171,3 +171,39 @@ def test_rejects_s3_key_that_disagrees_with_metadata() -> None:
             source_s3_key=wrong_key,
             loaded_at=LOADED_AT,
         )
+
+def test_accepts_historical_campaign_row_without_conversion_event() -> None:
+    row = {
+        column: "source value"
+        for column in SOURCE_COLUMNS["dim_campaign"]
+        if column != "primary_conversion_event"
+    }
+    row["_raw_row_id"] = 8
+
+    document = {
+        "metadata": {
+            "table_name": "dim_campaign",
+            "load_type": "historical",
+            "page_number": 1,
+            "extracted_at": EXTRACTED_AT,
+        },
+        "response": {
+            "table_name": "dim_campaign",
+            "since": 0,
+            "data": [row],
+            "count": 1,
+            "next_since": 1007,
+            "has_more": False,
+        },
+    }
+
+    page = s3_document_to_staging_page(
+        document,
+        source_s3_key=SOURCE_KEY.replace(
+            "dim_customer",
+            "dim_campaign",
+        ),
+        loaded_at=LOADED_AT,
+    )
+
+    assert page.rows[0]["primary_conversion_event"] is None

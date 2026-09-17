@@ -75,6 +75,7 @@ def test_analytics_columns_use_documented_postgresql_types() -> None:
         ),
         "dim_campaign": (
             "campaign_id integer primary key",
+            "primary_conversion_event text",
             "active_start_date date",
             "default_treatment_share numeric(5, 4)",
             "is_evergreen boolean",

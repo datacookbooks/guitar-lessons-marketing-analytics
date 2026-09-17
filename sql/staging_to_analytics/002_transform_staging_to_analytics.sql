@@ -179,6 +179,19 @@ WITH cleaned AS (
             THEN LOWER(BTRIM(objective))
         END AS objective,
         CASE
+            WHEN LOWER(BTRIM(primary_conversion_event)) IN (
+                'registration',
+                'first_paid_start'
+            )
+            THEN LOWER(BTRIM(primary_conversion_event))
+            WHEN primary_conversion_event IS NULL
+                AND LOWER(BTRIM(objective)) = 'acquisition'
+            THEN 'registration'
+            WHEN primary_conversion_event IS NULL
+                AND LOWER(BTRIM(objective)) = 'free-to-paid conversion'
+            THEN 'first_paid_start'
+        END AS primary_conversion_event,
+        CASE
             WHEN pg_input_is_valid(BTRIM(active_start_date), 'timestamp')
             THEN BTRIM(active_start_date)::timestamp::date
         END AS active_start_date,
@@ -226,6 +239,7 @@ INSERT INTO analytics.dim_campaign (
     campaign_name,
     channel,
     objective,
+    primary_conversion_event,
     active_start_date,
     active_end_date,
     default_treatment_share,
@@ -240,6 +254,7 @@ SELECT
     campaign_name,
     channel,
     objective,
+    primary_conversion_event,
     active_start_date,
     active_end_date,
     default_treatment_share,
@@ -255,6 +270,7 @@ SET
     campaign_name = EXCLUDED.campaign_name,
     channel = EXCLUDED.channel,
     objective = EXCLUDED.objective,
+    primary_conversion_event = EXCLUDED.primary_conversion_event,
     active_start_date = EXCLUDED.active_start_date,
     active_end_date = EXCLUDED.active_end_date,
     default_treatment_share = EXCLUDED.default_treatment_share,
@@ -269,6 +285,7 @@ WHERE analytics.dim_campaign.campaign_id <> -1
     analytics.dim_campaign.campaign_name,
     analytics.dim_campaign.channel,
     analytics.dim_campaign.objective,
+    analytics.dim_campaign.primary_conversion_event,
     analytics.dim_campaign.active_start_date,
     analytics.dim_campaign.active_end_date,
     analytics.dim_campaign.default_treatment_share,
@@ -281,6 +298,7 @@ WHERE analytics.dim_campaign.campaign_id <> -1
     EXCLUDED.campaign_name,
     EXCLUDED.channel,
     EXCLUDED.objective,
+    EXCLUDED.primary_conversion_event,
     EXCLUDED.active_start_date,
     EXCLUDED.active_end_date,
     EXCLUDED.default_treatment_share,
