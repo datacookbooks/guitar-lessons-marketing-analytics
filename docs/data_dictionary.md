@@ -210,16 +210,18 @@ deliveries may contain several versions of that business key. Business key:
 |---|---|---|---|
 | `metric_date` | Campaign reporting date | Midnight timestamp-shaped text | `date` after guarded conversion |
 | `campaign_id` | Campaign identifier | Numeric-shaped text | Integer after guarded cast |
+| `_generated_for_date` | Business date of the source generation | Date-shaped text | `date` as `generated_for_date`; newest valid generation wins after row validity |
 | `impressions` | Delivered impressions | Numeric-shaped or deliberately malformed text | Nonnegative integer after guarded cast |
 | `clicks` | Delivered clicks | Numeric-shaped, blank, or deliberately malformed text | Nonnegative integer; blanks/invalids become `null` and quality events |
 | `spend` | Campaign spend | Decimal-shaped or deliberately malformed text | Nonnegative `numeric(12,2)` after guarded cast |
 | `platform_attributed_conversions` | Platform-reported conversions | Numeric-shaped text | Nonnegative integer after guarded cast |
-| `ingested_at` | Time this version entered the source | Timezone-aware timestamp text | `timestamptz`; latest valid version wins |
+| `ingested_at` | Time this version entered the source | Timezone-aware timestamp text | `timestamptz`; delivery-time tie-breaker after `generated_for_date` |
 
 Observed in the representative page: eight blank `clicks` values. Zero spend
 is valid for the Email campaign. Late spend corrections create multiple raw
-versions of the same campaign/date; analytics must select the latest version by
-`ingested_at` rather than summing versions.
+versions of the same campaign/date. Analytics selects a fully valid row from
+the newest `generated_for_date`, then uses `ingested_at`, extraction time, and
+raw delivery order as deterministic tie-breakers. Versions are never summed.
 
 ## `fact_campaign_assignment`
 
@@ -252,7 +254,7 @@ so rows remain in their originally assigned arms regardless of exposure.
 | Blank or null email/click values | Preserve exactly | Convert blank to null, validate, and report quality counts |
 | Casing and surrounding whitespace differences | Preserve exactly | `TRIM` and standardize known categories |
 | `unknown`, `not_available`, or other malformed numeric text | Preserve exactly | Regex-guard casts; invalid values become null and quality events |
-| Late campaign-spend correction | Retain every version | Choose the latest version by `ingested_at` for each campaign/date |
+| Late campaign-spend correction | Retain every version | Choose a fully valid row from the newest `_generated_for_date`, then apply delivery-time tie-breakers |
 | Unknown campaign ID | Retain without staging foreign-key failure | Exclude or quarantine from matched metrics and report the mismatch |
 | Out-of-order business timestamps | Load in cursor order and retain timestamps | Order business analysis by typed event/update timestamps |
 

@@ -132,7 +132,7 @@ descending so rank 1 is the selected delivery:
 | `dim_customer` | valid `source_updated_at`, `extracted_at`, numeric raw-delivery ID |
 | `fact_subscription_period` | valid `source_updated_at`, `extracted_at`, numeric raw-delivery ID |
 | `fact_payment` | valid `ingested_at`, `extracted_at`, numeric raw-delivery ID |
-| `fact_campaign_daily` | row validity, valid `ingested_at`, `extracted_at`, numeric raw-delivery ID |
+| `fact_campaign_daily` | row validity, valid generated date, valid `ingested_at`, `extracted_at`, numeric raw-delivery ID |
 | `fact_campaign_assignment` | valid `source_updated_at`, `extracted_at`, numeric raw-delivery ID |
 
 The staging contract guarantees that `_raw_row_id` contains ASCII digits, so
@@ -141,12 +141,14 @@ event timestamps such as `signup_timestamp`, `payment_timestamp`,
 `period_start_timestamp`, and `assigned_at` never substitute for the API
 cursor or raw-delivery order.
 
-For `fact_campaign_daily`, all 88 duplicated campaign/date groups contained
-one excess delivery. Forty groups were exact repeats. The remaining 48 groups
-had a later `ingested_at` and a changed `spend`; impressions, clicks, and
-attributed conversions did not change. The latest fully valid delivery wins.
-If a key has no fully valid delivery, retain its latest delivery with invalid
-measures converted to `NULL` and record the relevant quality issues.
+For `fact_campaign_daily`, prefer a fully valid row first. Among rows with
+equal validity, the newest valid `generated_for_date` wins, followed by
+`ingested_at`, `extracted_at`, and numeric raw-delivery ID as deterministic
+tie-breakers. This allows a newer historical replay to replace an older
+generated version even when the replay preserves an earlier simulated
+`ingested_at`. If a key has no fully valid delivery, retain its highest-ranked
+delivery with invalid measures converted to `NULL` and record the relevant
+quality issues.
 
 ## Relationship policy
 

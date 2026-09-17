@@ -62,7 +62,7 @@ EXPECTED_RECONCILIATION = {
     "campaign_daily_rows": 2_970,
     "incremental_windows": 32,
     "final_90d_windows": 26,
-    "quality_issues": 9_335,
+    "quality_issues": 9_383,
     "sufficient_plan_clv_rows": 2,
 }
 
