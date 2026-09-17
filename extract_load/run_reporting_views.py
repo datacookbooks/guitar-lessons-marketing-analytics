@@ -53,16 +53,16 @@ VIEW_NAMES = (
 )
 
 EXPECTED_RECONCILIATION = {
-    "movement_opening_paid": 41_458,
-    "movement_churned_paid": 2_664,
-    "retention_eligible": 45_261,
-    "retention_retained": 29_782,
-    "failed_billing_episodes": 4_109,
-    "recovered_episodes": 2_969,
-    "campaign_daily_rows": 2_904,
+    "movement_opening_paid": 44_023,
+    "movement_churned_paid": 2_768,
+    "retention_eligible": 46_873,
+    "retention_retained": 30_825,
+    "failed_billing_episodes": 4_274,
+    "recovered_episodes": 3_093,
+    "campaign_daily_rows": 2_970,
     "incremental_windows": 32,
     "final_90d_windows": 26,
-    "quality_issues": 5_848,
+    "quality_issues": 9_335,
     "sufficient_plan_clv_rows": 2,
 }
 
@@ -202,7 +202,9 @@ def reporting_reconciliation(cursor: Any) -> dict[str, int]:
     )
     incremental_windows, final_90d_windows = cursor.fetchone()
 
-    cursor.execute("SELECT SUM(issue_records) FROM reporting.vw_data_quality")
+    cursor.execute(
+        "SELECT SUM(issue_records)::bigint FROM reporting.vw_data_quality"
+    )
     quality_issues = cursor.fetchone()[0]
 
     cursor.execute(
@@ -236,7 +238,9 @@ def validate_reconciliation(actual: Mapping[str, int]) -> None:
 
     if dict(actual) != EXPECTED_RECONCILIATION:
         raise ReportingViewError(
-            "Reporting components did not match the reviewed expectations."
+            "Reporting components did not match the reviewed expectations. "
+            f"Expected: {EXPECTED_RECONCILIATION!r}; "
+            f"actual: {dict(actual)!r}."
         )
 
 
@@ -360,9 +364,22 @@ def main() -> None:
         print(f"  helpers: {HELPER_SQL_PATH.relative_to(PROJECT_ROOT)}")
         print(f"  dashboard views: {REPORTING_SQL_PATH.relative_to(PROJECT_ROOT)}")
         print(f"  reviewed replaceable views: {len(VIEW_NAMES)}")
-        print("  reviewed dimension/fact rows: 166,806")
-        print("  reviewed quality issues: 5,848")
-        print("  reviewed reporting cutoff: 2026-08-25")
+        reviewed_dimension_fact_rows = sum(
+            count
+            for table_name, count in EXPECTED_ANALYTICS_COUNTS.items()
+            if table_name != "data_quality_issue"
+        )
+        reviewed_quality_issues = EXPECTED_ANALYTICS_COUNTS["data_quality_issue"]
+
+        print(
+            f"  reviewed dimension/fact rows: "
+            f"{reviewed_dimension_fact_rows:,}"
+        )
+        print(f"  reviewed quality issues: {reviewed_quality_issues:,}")
+        print(
+            "  reporting cutoff: supplied with "
+            "--expected-data-through-date when applying"
+        )
         print("Plan inspection complete; no PostgreSQL connection was opened.")
         return
 
