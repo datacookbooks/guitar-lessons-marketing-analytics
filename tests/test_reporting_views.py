@@ -13,6 +13,7 @@ REPORTING_SQL_PATH = (
 )
 
 EXPECTED_REPORTING_VIEWS = {
+    "vw_new_paid_customers_monthly",
     "vw_monthly_paid_movement",
     "vw_paid_cohort_retention",
     "vw_payment_recovery",
@@ -52,6 +53,23 @@ def test_reporting_script_has_no_destructive_statements() -> None:
         sql_without_comments,
         re.IGNORECASE,
     )
+
+
+def test_new_paid_customers_uses_first_paid_cohort_once() -> None:
+    sql = _reporting_sql()
+    view_start = sql.index(
+        "CREATE OR REPLACE VIEW reporting.vw_new_paid_customers_monthly"
+    )
+    view_end = sql.index("CREATE OR REPLACE VIEW", view_start + 1)
+    view_sql = re.sub(r"\s+", " ", sql[view_start:view_end]).lower()
+
+    assert "from analytics.vw_customer_paid_cohort as cohort" in view_sql
+    assert "cohort.paid_cohort_month as month_start" in view_sql
+    assert "'unknown/unattributed'" in view_sql
+    assert "coalesce(cohort.first_campaign_id, -1) as first_campaign_id" in view_sql
+    assert "cohort.initial_paid_plan_id" in view_sql
+    assert "count(*) as new_paid_customers" in view_sql
+    assert " join " not in view_sql
 
 
 def test_churn_and_retention_views_expose_components_and_safe_rates() -> None:

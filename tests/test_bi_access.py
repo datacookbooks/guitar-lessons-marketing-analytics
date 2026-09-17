@@ -18,6 +18,7 @@ APPROVED_SELECT_OBJECTS = {
     "analytics.dim_plan",
     "analytics.dim_campaign",
     "analytics.vw_reporting_cutoff",
+    "reporting.vw_new_paid_customers_monthly",
     "reporting.vw_monthly_paid_movement",
     "reporting.vw_paid_cohort_retention",
     "reporting.vw_payment_recovery",
@@ -67,6 +68,10 @@ def _granted_select_objects() -> set[str]:
     }
 
 
+def test_existing_bi_role_is_verified_not_altered() -> None:
+    assert f"alter role {BI_ROLE}" not in _normalized_sql()
+
+
 def test_bi_access_script_exists_and_is_transactional() -> None:
     assert SQL_PATH.is_file()
 
@@ -76,15 +81,14 @@ def test_bi_access_script_exists_and_is_transactional() -> None:
     assert sql.endswith("commit;")
 
 
-def test_bi_group_role_is_rerunnable_and_cannot_log_in() -> None:
+def test_bi_group_role_is_created_safely_when_missing() -> None:
     sql = _normalized_sql()
 
     assert "from pg_catalog.pg_roles" in sql
     assert f"where rolname = '{BI_ROLE}'" in sql
     assert f"create role {BI_ROLE}" in sql
-    assert f"alter role {BI_ROLE}" in sql
 
-    for attribute in (
+    for safe_attribute in (
         "nologin",
         "nosuperuser",
         "nocreatedb",
@@ -93,7 +97,7 @@ def test_bi_group_role_is_rerunnable_and_cannot_log_in() -> None:
         "noreplication",
         "nobypassrls",
     ):
-        assert attribute in sql
+        assert safe_attribute in sql
 
 
 def test_database_privileges_use_current_database_without_secret_values() -> None:

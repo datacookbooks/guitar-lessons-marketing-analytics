@@ -102,13 +102,13 @@ def test_iso_date_rejects_invalid_value() -> None:
         reporting_runner._iso_date("08/25/2026")
 
 
-def test_reviewed_scripts_contain_seventeen_views() -> None:
+def test_reviewed_scripts_contain_eighteen_views() -> None:
     statements = (
         reporting_runner.sql_statements(reporting_runner.HELPER_SQL_PATH)
         + reporting_runner.sql_statements(reporting_runner.REPORTING_SQL_PATH)
     )
 
-    assert len(statements) == 17
+    assert len(statements) == 18
     assert all(
         statement.upper().startswith("CREATE OR REPLACE VIEW")
         for statement in statements

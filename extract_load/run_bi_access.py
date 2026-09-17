@@ -27,6 +27,7 @@ APPROVED_RELATIONS = (
     "analytics.dim_plan",
     "analytics.dim_campaign",
     "analytics.vw_reporting_cutoff",
+    "reporting.vw_new_paid_customers_monthly",
     "reporting.vw_monthly_paid_movement",
     "reporting.vw_paid_cohort_retention",
     "reporting.vw_payment_recovery",

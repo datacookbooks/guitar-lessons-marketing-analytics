@@ -1,8 +1,7 @@
 BEGIN;
 
--- This NOLOGIN role owns the reusable Power BI privilege set.
--- A separate LOGIN role and its password are created operationally outside
--- Git, then granted membership in this role.
+-- Create the reusable read-only role during initial setup. Existing role
+-- attributes are verified by the deployment runner rather than altered here.
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -11,15 +10,6 @@ BEGIN
         WHERE rolname = 'marketing_analytics_bi_reader'
     ) THEN
         CREATE ROLE marketing_analytics_bi_reader
-            NOLOGIN
-            NOSUPERUSER
-            NOCREATEDB
-            NOCREATEROLE
-            NOINHERIT
-            NOREPLICATION
-            NOBYPASSRLS;
-    ELSE
-        ALTER ROLE marketing_analytics_bi_reader
             NOLOGIN
             NOSUPERUSER
             NOCREATEDB
@@ -80,6 +70,7 @@ GRANT SELECT ON TABLE
     analytics.dim_plan,
     analytics.dim_campaign,
     analytics.vw_reporting_cutoff,
+    reporting.vw_new_paid_customers_monthly,
     reporting.vw_monthly_paid_movement,
     reporting.vw_paid_cohort_retention,
     reporting.vw_payment_recovery,

@@ -76,6 +76,13 @@ def test_verify_bi_role_accepts_exact_privilege_design() -> None:
     )
 
 
+def test_approved_relations_include_new_paid_customers_view() -> None:
+    assert (
+        "reporting.vw_new_paid_customers_monthly"
+        in bi_runner.APPROVED_RELATIONS
+    )
+
+
 def test_verify_bi_role_rejects_wrong_database() -> None:
     cursor = Mock()
     cursor.fetchone.return_value = ("another_database",)

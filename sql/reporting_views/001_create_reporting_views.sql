@@ -1,5 +1,27 @@
 BEGIN;
 
+-- Grain: first-paid month, initial acquisition channel, first campaign,
+-- and initial paid plan. Each customer contributes exactly once.
+CREATE OR REPLACE VIEW reporting.vw_new_paid_customers_monthly AS
+SELECT
+    cohort.paid_cohort_month AS month_start,
+    COALESCE(
+        NULLIF(BTRIM(cohort.initial_acquisition_channel), ''),
+        'Unknown/Unattributed'
+    ) AS initial_acquisition_channel,
+    COALESCE(cohort.first_campaign_id, -1) AS first_campaign_id,
+    cohort.initial_paid_plan_id,
+    COUNT(*) AS new_paid_customers
+FROM analytics.vw_customer_paid_cohort AS cohort
+GROUP BY
+    cohort.paid_cohort_month,
+    COALESCE(
+        NULLIF(BTRIM(cohort.initial_acquisition_channel), ''),
+        'Unknown/Unattributed'
+    ),
+    COALESCE(cohort.first_campaign_id, -1),
+    cohort.initial_paid_plan_id;
+
 -- Grain: month plus opening paid plan and approved customer segments.
 CREATE OR REPLACE VIEW reporting.vw_monthly_paid_movement AS
 SELECT

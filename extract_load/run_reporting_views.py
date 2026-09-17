@@ -40,6 +40,7 @@ VIEW_NAMES = (
     "analytics.vw_customer_clv_month",
     "analytics.vw_payment_recovery_episode",
     "analytics.vw_campaign_assignment_outcome",
+    "reporting.vw_new_paid_customers_monthly",
     "reporting.vw_monthly_paid_movement",
     "reporting.vw_paid_cohort_retention",
     "reporting.vw_payment_recovery",
@@ -53,6 +54,7 @@ VIEW_NAMES = (
 )
 
 EXPECTED_RECONCILIATION = {
+    "new_paid_customers": 5_227,
     "movement_opening_paid": 44_023,
     "movement_churned_paid": 2_768,
     "retention_eligible": 46_873,
@@ -161,6 +163,14 @@ def reporting_reconciliation(cursor: Any) -> dict[str, int]:
 
     cursor.execute(
         """
+        SELECT SUM(new_paid_customers)::bigint
+        FROM reporting.vw_new_paid_customers_monthly
+        """
+    )
+    new_paid_customers = cursor.fetchone()[0]
+
+    cursor.execute(
+        """
         SELECT
             SUM(opening_paid_customers)::bigint,
             SUM(churned_paid_customers)::bigint
@@ -219,6 +229,7 @@ def reporting_reconciliation(cursor: Any) -> dict[str, int]:
     sufficient_plan_clv_rows = cursor.fetchone()[0]
 
     return {
+        "new_paid_customers": new_paid_customers,
         "movement_opening_paid": movement_opening_paid,
         "movement_churned_paid": movement_churned_paid,
         "retention_eligible": retention_eligible,
