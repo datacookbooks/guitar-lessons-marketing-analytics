@@ -34,21 +34,21 @@ ANALYTICS_TABLES = (
 EXPECTED_ANALYTICS_COUNTS = {
     "dim_plan": 3,
     "dim_campaign": 4,
-    "dim_customer": 11_273,
-    "fact_subscription_period": 14_585,
-    "fact_payment": 48_477,
-    "fact_campaign_daily": 2_904,
-    "fact_campaign_assignment": 89_560,
-    "data_quality_issue": 5_848,
+    "dim_customer": 11_606,
+    "fact_subscription_period": 15_018,
+    "fact_payment": 50_484,
+    "fact_campaign_daily": 2_970,
+    "fact_campaign_assignment": 91_734,
+    "data_quality_issue": 9_335,
 }
 
 EXPECTED_QUALITY_COUNTS = {
-    "exact_duplicate": 1_875,
-    "superseded_delivery": 3_340,
-    "missing_value": 62,
-    "blank_value": 87,
-    "invalid_numeric": 199,
-    "unknown_reference": 285,
+    "exact_duplicate": 1_965,
+    "superseded_delivery": 6_688,
+    "missing_value": 64,
+    "blank_value": 114,
+    "invalid_numeric": 208,
+    "unknown_reference": 296,
 }
 
 
@@ -151,13 +151,17 @@ def validate_reconciliation(
 
     if dict(actual_analytics) != EXPECTED_ANALYTICS_COUNTS:
         raise AnalyticsTransformError(
-            "Analytics row counts did not match the reviewed expectations."
+            "Analytics row counts did not match the reviewed expectations. "
+            f"Expected analytics: {EXPECTED_ANALYTICS_COUNTS!r}; "
+            f"actual analytics: {dict(actual_analytics)!r}; "
+            f"actual quality: {dict(actual_quality)!r}."
         )
     if dict(actual_quality) != EXPECTED_QUALITY_COUNTS:
         raise AnalyticsTransformError(
-            "Quality-issue counts did not match the reviewed expectations."
+            "Quality-issue counts did not match the reviewed expectations. "
+            f"Expected quality: {EXPECTED_QUALITY_COUNTS!r}; "
+            f"actual quality: {dict(actual_quality)!r}."
         )
-
 
 def analytics_fingerprints(cursor: Any) -> dict[str, tuple[int, int]]:
     """Fingerprint complete table values, including audit timestamps."""
@@ -348,8 +352,17 @@ def main() -> None:
         print("Analytics SQL execution plan:")
         print(f"  DDL: {DDL_PATH.relative_to(PROJECT_ROOT)}")
         print(f"  transformation: {TRANSFORM_PATH.relative_to(PROJECT_ROOT)}")
-        print("  reviewed analytics rows: 166,806 including the unknown campaign")
-        print("  reviewed quality issues: 5,848")
+        reviewed_analytics_rows = sum(
+            count
+            for table_name, count in EXPECTED_ANALYTICS_COUNTS.items()
+            if table_name != "data_quality_issue"
+        )
+        reviewed_quality_issues = sum(EXPECTED_QUALITY_COUNTS.values())
+        print(
+            f"  reviewed analytics rows: {reviewed_analytics_rows:,} "
+            "including the unknown campaign"
+        )
+        print(f"  reviewed quality issues: {reviewed_quality_issues:,}")
         print("Plan inspection complete; no PostgreSQL connection was opened.")
         return
 
