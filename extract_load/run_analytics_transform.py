@@ -39,12 +39,12 @@ EXPECTED_ANALYTICS_COUNTS = {
     "fact_payment": 50_484,
     "fact_campaign_daily": 2_970,
     "fact_campaign_assignment": 91_734,
-    "data_quality_issue": 9_335,
+    "data_quality_issue": 9_383,
 }
 
 EXPECTED_QUALITY_COUNTS = {
     "exact_duplicate": 1_965,
-    "superseded_delivery": 6_688,
+    "superseded_delivery": 6_736,
     "missing_value": 64,
     "blank_value": 114,
     "invalid_numeric": 208,

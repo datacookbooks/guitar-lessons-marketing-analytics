@@ -81,6 +81,42 @@ def test_campaign_corrections_and_unknown_campaign_policy_are_explicit() -> None
     assert "from staging.fact_campaign_assignment as source" in sql
 
 
+def test_campaign_daily_prefers_newer_generation_before_ingestion_time() -> None:
+    sql = _normalized_sql(TRANSFORM_PATH)
+
+    campaign_partition = sql.index(
+        "partition by metric_date, source_campaign_id"
+    )
+    completeness_rank = sql.index(
+        "and ingested_at is not null ) desc",
+        campaign_partition,
+    )
+    generation_rank = sql.index(
+        "generated_for_date desc nulls last",
+        campaign_partition,
+    )
+    ingestion_rank = sql.index(
+        "ingested_at desc nulls last",
+        campaign_partition,
+    )
+    extraction_rank = sql.index(
+        "extracted_at desc",
+        campaign_partition,
+    )
+    delivery_rank = sql.index(
+        "raw_delivery_order desc",
+        campaign_partition,
+    )
+
+    assert (
+        completeness_rank
+        < generation_rank
+        < ingestion_rank
+        < extraction_rank
+        < delivery_rank
+    )
+
+
 def test_quality_issues_cover_observed_defects_and_deduplication() -> None:
     sql = _normalized_sql(TRANSFORM_PATH)
 

@@ -897,6 +897,7 @@ WITH cleaned AS (
                     AND platform_attributed_conversions IS NOT NULL
                     AND ingested_at IS NOT NULL
                 ) DESC,
+                generated_for_date DESC NULLS LAST,
                 ingested_at DESC NULLS LAST,
                 extracted_at DESC,
                 raw_delivery_order DESC
