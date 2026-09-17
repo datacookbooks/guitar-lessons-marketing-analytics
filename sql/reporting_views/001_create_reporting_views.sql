@@ -253,7 +253,8 @@ SELECT
     CASE
         WHEN daily.spend IS NOT NULL THEN
             daily.spend / NULLIF(daily.platform_attributed_conversions, 0)
-    END AS platform_cost_per_attributed_conversion
+    END AS platform_cost_per_attributed_conversion,
+    campaign.primary_conversion_event
 FROM analytics.fact_campaign_daily AS daily
 JOIN analytics.dim_campaign AS campaign
   ON campaign.campaign_id = daily.campaign_id
@@ -314,13 +315,15 @@ SELECT
     ) / NULLIF(
         COUNT(*) FILTER (WHERE outcome.is_value_outcome_mature),
         0
-    ) AS mean_realized_contribution_90d
+    ) AS mean_realized_contribution_90d,
+    outcome.primary_conversion_event
 FROM analytics.vw_campaign_assignment_outcome AS outcome
 WHERE outcome.campaign_id <> -1
 GROUP BY
     outcome.campaign_id,
     outcome.campaign_name,
     outcome.objective,
+    outcome.primary_conversion_event,
     outcome.measurement_window_id,
     outcome.measurement_window_start,
     outcome.measurement_window_end_exclusive,
@@ -337,6 +340,7 @@ WITH arm AS (
         campaign_id,
         campaign_name,
         objective,
+        primary_conversion_event,
         measurement_window_id,
         measurement_window_start,
         measurement_window_end_exclusive
@@ -361,6 +365,7 @@ WITH arm AS (
         arm.campaign_id,
         MAX(arm.campaign_name) AS campaign_name,
         MAX(arm.objective) AS objective,
+        MAX(arm.primary_conversion_event) AS primary_conversion_event,
         arm.measurement_window_id,
         MIN(arm.measurement_window_start) AS measurement_window_start,
         MAX(arm.measurement_window_end_exclusive)
@@ -490,7 +495,8 @@ SELECT
                 incremental.estimated_incremental_contribution_90d
                 - spend.spend
             ) / spend.spend
-    END AS incremental_roi_90d
+    END AS incremental_roi_90d,
+    incremental.primary_conversion_event
 FROM incremental
 JOIN window_spend AS spend
   ON spend.campaign_id = incremental.campaign_id

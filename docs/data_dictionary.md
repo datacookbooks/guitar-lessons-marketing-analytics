@@ -133,6 +133,7 @@ Grain: one row per marketing campaign. Business key: `campaign_id`.
 | `campaign_name` | Campaign display name | Text | Trim whitespace; preserve approved display name |
 | `channel` | Delivery channel | Text | Standardize known channel labels |
 | `objective` | Acquisition or conversion purpose | Text | Standardize known objectives |
+| `primary_conversion_event` | Event treated as the campaign conversion | Text | Normalize to `registration` or `first_paid_start`; derive from the objective only for historical rows that predate this field |
 | `active_start_date` | First active date | Timestamp-shaped text | `date` after guarded conversion |
 | `active_end_date` | Last active date | Timestamp-shaped text or `null` | `date`; `null` means still active |
 | `default_treatment_share` | Default fraction assigned to treatment | Decimal-shaped text | Bounded numeric after guarded cast |

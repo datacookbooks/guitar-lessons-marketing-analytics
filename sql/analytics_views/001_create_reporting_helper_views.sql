@@ -500,6 +500,7 @@ WITH assignment_customer AS (
         assignment.*,
         campaign.campaign_name,
         campaign.objective,
+        campaign.primary_conversion_event,
         COALESCE(assignment.customer_id, customer.customer_id)
             AS resolved_customer_id,
         customer.signup_timestamp,
@@ -522,9 +523,9 @@ WITH assignment_customer AS (
     SELECT
         assignment_customer.*,
         CASE
-            WHEN assignment_customer.objective = 'acquisition'
+            WHEN assignment_customer.primary_conversion_event = 'registration'
                 THEN assignment_customer.signup_timestamp
-            WHEN assignment_customer.objective = 'free-to-paid conversion'
+            WHEN assignment_customer.primary_conversion_event = 'first_paid_start'
                 THEN first_paid_after_assignment.paid_start_timestamp
         END AS conversion_timestamp
     FROM assignment_customer
@@ -595,7 +596,8 @@ SELECT
             event.measurement_window_start + INTERVAL '3 months 90 days'
         ) AT TIME ZONE 'UTC'
         <= cutoff.data_through_exclusive
-    ) AS is_measurement_window_final_90d
+    ) AS is_measurement_window_final_90d,
+    event.primary_conversion_event
 FROM conversion_event AS event
 CROSS JOIN analytics.vw_reporting_cutoff AS cutoff
 LEFT JOIN LATERAL (
