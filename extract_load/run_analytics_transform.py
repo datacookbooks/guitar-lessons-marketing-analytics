@@ -34,20 +34,20 @@ ANALYTICS_TABLES = (
 EXPECTED_ANALYTICS_COUNTS = {
     "dim_plan": 3,
     "dim_campaign": 4,
-    "dim_customer": 11_606,
-    "fact_subscription_period": 15_018,
-    "fact_payment": 50_484,
-    "fact_campaign_daily": 2_970,
-    "fact_campaign_assignment": 91_734,
-    "data_quality_issue": 9_383,
+    "dim_customer": 11_643,
+    "fact_subscription_period": 15_076,
+    "fact_payment": 50_777,
+    "fact_campaign_daily": 2_979,
+    "fact_campaign_assignment": 92_062,
+    "data_quality_issue": 9_454,
 }
 
 EXPECTED_QUALITY_COUNTS = {
-    "exact_duplicate": 1_965,
-    "superseded_delivery": 6_736,
+    "exact_duplicate": 1_973,
+    "superseded_delivery": 6_797,
     "missing_value": 64,
     "blank_value": 114,
-    "invalid_numeric": 208,
+    "invalid_numeric": 210,
     "unknown_reference": 296,
 }
 

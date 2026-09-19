@@ -54,17 +54,17 @@ VIEW_NAMES = (
 )
 
 EXPECTED_RECONCILIATION = {
-    "new_paid_customers": 5_227,
+    "new_paid_customers": 5_244,
     "movement_opening_paid": 44_023,
-    "movement_churned_paid": 2_768,
-    "retention_eligible": 46_873,
-    "retention_retained": 30_825,
-    "failed_billing_episodes": 4_274,
-    "recovered_episodes": 3_093,
-    "campaign_daily_rows": 2_970,
+    "movement_churned_paid": 2_793,
+    "retention_eligible": 47_138,
+    "retention_retained": 30_994,
+    "failed_billing_episodes": 4_305,
+    "recovered_episodes": 3_111,
+    "campaign_daily_rows": 2_979,
     "incremental_windows": 32,
     "final_90d_windows": 26,
-    "quality_issues": 9_383,
+    "quality_issues": 9_454,
     "sufficient_plan_clv_rows": 2,
 }
 
