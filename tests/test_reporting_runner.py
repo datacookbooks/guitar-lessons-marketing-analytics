@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
@@ -40,36 +39,20 @@ def test_source_guardrails_reject_changed_cutoff() -> None:
         match="cutoff guardrail",
     ):
         reporting_runner.validate_source_guardrails(
-            actual_analytics=reporting_runner.EXPECTED_ANALYTICS_COUNTS,
-            actual_data_through_date=date(2026, 8, 26),
-            expected_data_through_date=date(2026, 8, 25),
+            actual_analytics={"dim_customer": 1},
+            actual_data_through_date=None,
         )
 
 
 def test_source_guardrails_reject_changed_analytics_counts() -> None:
-    changed = dict(reporting_runner.EXPECTED_ANALYTICS_COUNTS)
-    changed["dim_customer"] += 1
-
     with pytest.raises(
         reporting_runner.ReportingViewError,
-        match="Analytics source counts",
+        match="sources were empty",
     ):
         reporting_runner.validate_source_guardrails(
-            actual_analytics=changed,
+            actual_analytics={"dim_customer": 0},
             actual_data_through_date=date(2026, 8, 25),
-            expected_data_through_date=date(2026, 8, 25),
         )
-
-
-def test_reconciliation_rejects_changed_component() -> None:
-    changed = dict(reporting_runner.EXPECTED_RECONCILIATION)
-    changed["incremental_windows"] += 1
-
-    with pytest.raises(
-        reporting_runner.ReportingViewError,
-        match="Reporting components",
-    ):
-        reporting_runner.validate_reconciliation(changed)
 
 
 def test_apply_closes_connection_when_source_guardrail_fails() -> None:
@@ -78,28 +61,19 @@ def test_apply_closes_connection_when_source_guardrail_fails() -> None:
     cursor.__exit__ = Mock(return_value=False)
     connection = Mock()
     connection.cursor.return_value = cursor
-    cursor.fetchone.side_effect = [
-        *((count,) for count in reporting_runner.EXPECTED_ANALYTICS_COUNTS.values()),
-        (date(2026, 8, 26),),
-    ]
+    cursor.fetchone.side_effect = [(0,)] * 8 + [(date(2026, 8, 26),)]
 
     with pytest.raises(
         reporting_runner.ReportingViewError,
-        match="cutoff guardrail",
+        match="sources were empty",
     ):
         reporting_runner.apply_reporting_views(
             connection=connection,
-            expected_data_through_date=date(2026, 8, 25),
             verify_rerun=False,
             output=lambda _: None,
         )
 
     connection.close.assert_called_once()
-
-
-def test_iso_date_rejects_invalid_value() -> None:
-    with pytest.raises(argparse.ArgumentTypeError):
-        reporting_runner._iso_date("08/25/2026")
 
 
 def test_reviewed_scripts_contain_eighteen_views() -> None:

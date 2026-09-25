@@ -12,11 +12,8 @@ from typing import Any
 import psycopg
 
 from .config import PostgresSettings
-from .run_analytics_transform import (
-    EXPECTED_ANALYTICS_COUNTS,
-    analytics_counts,
-)
-
+from .pipeline_validation import validate_reporting_invariants
+from .run_analytics_transform import analytics_counts
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HELPER_SQL_PATH = (
@@ -53,22 +50,6 @@ VIEW_NAMES = (
     "reporting.vw_data_quality",
 )
 
-EXPECTED_RECONCILIATION = {
-    "new_paid_customers": 5_244,
-    "movement_opening_paid": 44_023,
-    "movement_churned_paid": 2_793,
-    "retention_eligible": 47_138,
-    "retention_retained": 30_994,
-    "failed_billing_episodes": 4_305,
-    "recovered_episodes": 3_111,
-    "campaign_daily_rows": 2_979,
-    "incremental_windows": 32,
-    "final_90d_windows": 26,
-    "quality_issues": 9_454,
-    "sufficient_plan_clv_rows": 2,
-}
-
-
 class ReportingViewError(RuntimeError):
     """Raised when a reporting-view guardrail or reconciliation fails."""
 
@@ -97,7 +78,7 @@ def connect_reporting_postgres(settings: PostgresSettings) -> psycopg.Connection
     return psycopg.connect(**connection_kwargs)
 
 
-def source_data_through_date(cursor: Any) -> date:
+def source_data_through_date(cursor: Any) -> date | None:
     """Return the shared conservative cutoff directly from analytics sources."""
 
     cursor.execute(
@@ -128,20 +109,22 @@ def source_data_through_date(cursor: Any) -> date:
 def validate_source_guardrails(
     *,
     actual_analytics: Mapping[str, int],
-    actual_data_through_date: date,
-    expected_data_through_date: date,
+    actual_data_through_date: date | None,
 ) -> None:
-    """Stop before writes when the reviewed analytics snapshot changed."""
+    """Stop before writes when required analytics sources are unavailable."""
 
-    if dict(actual_analytics) != EXPECTED_ANALYTICS_COUNTS:
+    empty_tables = [
+        table_name
+        for table_name, count in actual_analytics.items()
+        if table_name != "data_quality_issue" and count < 1
+    ]
+    if empty_tables:
         raise ReportingViewError(
-            "Analytics source counts did not match the reviewed expectations."
+            "Required analytics sources were empty: " + ", ".join(empty_tables) + "."
         )
-    if actual_data_through_date != expected_data_through_date:
+    if actual_data_through_date is None:
         raise ReportingViewError(
-            "Reporting cutoff guardrail failed: "
-            f"expected {expected_data_through_date.isoformat()}, "
-            f"found {actual_data_through_date.isoformat()}."
+            "Reporting cutoff guardrail failed: analytics sources had no shared date."
         )
 
 
@@ -244,17 +227,6 @@ def reporting_reconciliation(cursor: Any) -> dict[str, int]:
     }
 
 
-def validate_reconciliation(actual: Mapping[str, int]) -> None:
-    """Require the live result to match the reviewed profile exactly."""
-
-    if dict(actual) != EXPECTED_RECONCILIATION:
-        raise ReportingViewError(
-            "Reporting components did not match the reviewed expectations. "
-            f"Expected: {EXPECTED_RECONCILIATION!r}; "
-            f"actual: {dict(actual)!r}."
-        )
-
-
 def _execute_scripts(cursor: Any, output: Callable[[str], None]) -> None:
     for path in (HELPER_SQL_PATH, REPORTING_SQL_PATH):
         statements = sql_statements(path)
@@ -274,7 +246,6 @@ def _print_reconciliation(
 def apply_reporting_views(
     *,
     connection: Any,
-    expected_data_through_date: date,
     verify_rerun: bool,
     output: Callable[[str], None] = print,
 ) -> None:
@@ -287,10 +258,9 @@ def apply_reporting_views(
             validate_source_guardrails(
                 actual_analytics=actual_analytics,
                 actual_data_through_date=actual_cutoff,
-                expected_data_through_date=expected_data_through_date,
             )
         connection.rollback()
-        output("Analytics-count and reporting-cutoff guardrails passed.")
+        output("Analytics availability and reporting-cutoff guardrails passed.")
 
         try:
             with connection.cursor() as cursor:
@@ -298,7 +268,10 @@ def apply_reporting_views(
                 _execute_scripts(cursor, output)
                 view_definitions(cursor)
                 values = reporting_reconciliation(cursor)
-                validate_reconciliation(values)
+                validate_reporting_invariants(
+                    analytics_counts=actual_analytics,
+                    reporting_values=values,
+                )
             connection.commit()
         except Exception:
             connection.rollback()
@@ -320,7 +293,10 @@ def apply_reporting_views(
                         "The unchanged-input rerun changed view definitions."
                     )
                 rerun_values = reporting_reconciliation(cursor)
-                validate_reconciliation(rerun_values)
+                validate_reporting_invariants(
+                    analytics_counts=actual_analytics,
+                    reporting_values=rerun_values,
+                )
             connection.commit()
         except Exception:
             connection.rollback()
@@ -330,13 +306,6 @@ def apply_reporting_views(
         connection.close()
 
 
-def _iso_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("Expected a date in YYYY-MM-DD form.") from exc
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Inspect or deliberately apply the reporting SQL layer."
@@ -344,12 +313,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Persist the reviewed helper and reporting views in RDS.",
-    )
-    parser.add_argument(
-        "--expected-data-through-date",
-        type=_iso_date,
-        help="Required with --apply; exact reviewed reporting cutoff.",
+        help="Persist the helper and reporting views in RDS.",
     )
     parser.add_argument(
         "--verify-rerun",
@@ -363,41 +327,22 @@ def main() -> None:
     parser = _parser()
     args = parser.parse_args()
 
-    if not args.apply and args.expected_data_through_date is not None:
-        parser.error("--expected-data-through-date requires --apply.")
     if not args.apply and args.verify_rerun:
         parser.error("--verify-rerun requires --apply.")
-    if args.apply and args.expected_data_through_date is None:
-        parser.error("--apply requires --expected-data-through-date.")
 
     if not args.apply:
         print("Reporting SQL execution plan:")
         print(f"  helpers: {HELPER_SQL_PATH.relative_to(PROJECT_ROOT)}")
         print(f"  dashboard views: {REPORTING_SQL_PATH.relative_to(PROJECT_ROOT)}")
         print(f"  reviewed replaceable views: {len(VIEW_NAMES)}")
-        reviewed_dimension_fact_rows = sum(
-            count
-            for table_name, count in EXPECTED_ANALYTICS_COUNTS.items()
-            if table_name != "data_quality_issue"
-        )
-        reviewed_quality_issues = EXPECTED_ANALYTICS_COUNTS["data_quality_issue"]
-
-        print(
-            f"  reviewed dimension/fact rows: "
-            f"{reviewed_dimension_fact_rows:,}"
-        )
-        print(f"  reviewed quality issues: {reviewed_quality_issues:,}")
-        print(
-            "  reporting cutoff: supplied with "
-            "--expected-data-through-date when applying"
-        )
+        print("  reporting cutoff: derived from current analytics sources")
+        print("  validation: recurring reporting relationships")
         print("Plan inspection complete; no PostgreSQL connection was opened.")
         return
 
     settings = PostgresSettings.from_env()
     apply_reporting_views(
         connection=connect_reporting_postgres(settings),
-        expected_data_through_date=args.expected_data_through_date,
         verify_rerun=args.verify_rerun,
     )
 
