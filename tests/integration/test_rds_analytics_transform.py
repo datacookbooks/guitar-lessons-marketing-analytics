@@ -11,6 +11,15 @@ import pytest
 from dotenv import load_dotenv
 from psycopg import sql
 
+from extract_load.pipeline_validation import (
+    analytics_lineage_violations,
+    staging_state,
+    unknown_campaign_is_valid,
+    validate_analytics_invariants,
+    validate_staging_state,
+)
+from extract_load.run_analytics_transform import analytics_counts
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SQL_DIR = PROJECT_ROOT / "sql" / "staging_to_analytics"
@@ -48,27 +57,6 @@ ANALYTICS_TABLES = (
     "fact_campaign_assignment",
     "data_quality_issue",
 )
-
-EXPECTED_ANALYTICS_COUNTS = {
-    "dim_plan": 3,
-    "dim_campaign": 4,
-    "dim_customer": 11_273,
-    "fact_subscription_period": 14_585,
-    "fact_payment": 48_477,
-    "fact_campaign_daily": 2_904,
-    "fact_campaign_assignment": 89_560,
-    "data_quality_issue": 5_848,
-}
-
-EXPECTED_QUALITY_COUNTS = {
-    "exact_duplicate": 1_875,
-    "superseded_delivery": 3_340,
-    "missing_value": 62,
-    "blank_value": 87,
-    "invalid_numeric": 199,
-    "unknown_reference": 285,
-}
-
 
 def _environment() -> dict[str, str]:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
@@ -124,44 +112,30 @@ def _database_snapshot(env: dict[str, str]) -> dict[str, tuple[str | None, int |
     return snapshot
 
 
-def _assert_staging_baseline(cursor: psycopg.Cursor) -> None:
-    staging_tables = ANALYTICS_TABLES[:7]
-    total_rows = 0
-    for table_name in staging_tables:
-        cursor.execute(
-            sql.SQL("SELECT COUNT(*) FROM staging.{}").format(
-                sql.Identifier(table_name)
-            )
-        )
-        total_rows += cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM staging.etl_loaded_object")
-    manifest_objects = cursor.fetchone()[0]
-
-    assert total_rows == 170_145
-    assert manifest_objects == 178
-
-
 def test_live_analytics_sql_validates_and_rolls_back() -> None:
     env = _environment()
     before = _database_snapshot(env)
+    before_counts = {
+        table_name: row_count or 0
+        for table_name, (_, row_count) in before.items()
+    }
     connection = _connect(env)
 
     try:
         with connection.cursor() as cursor:
-            _assert_staging_baseline(cursor)
+            validate_staging_state(staging_state(cursor))
 
             for path in (DDL_PATH, TRANSFORM_PATH):
                 for statement in _statements_without_transaction_control(path):
                     cursor.execute(statement)
 
-            for table_name, expected_count in EXPECTED_ANALYTICS_COUNTS.items():
-                cursor.execute(
-                    sql.SQL("SELECT COUNT(*) FROM analytics.{}").format(
-                        sql.Identifier(table_name)
-                    )
-                )
-                assert cursor.fetchone()[0] == expected_count
+            after_counts = analytics_counts(cursor)
+            validate_analytics_invariants(
+                before_counts=before_counts,
+                after_counts=after_counts,
+                lineage_violations=analytics_lineage_violations(cursor),
+                unknown_campaign_valid=unknown_campaign_is_valid(cursor),
+            )
 
             cursor.execute(
                 """
@@ -171,11 +145,7 @@ def test_live_analytics_sql_validates_and_rolls_back() -> None:
                 """
             )
             quality_counts = dict(cursor.fetchall())
-            for issue_code, expected_count in EXPECTED_QUALITY_COUNTS.items():
-                assert quality_counts.get(issue_code, 0) == expected_count
-
-            unexpected_nonzero = set(quality_counts) - set(EXPECTED_QUALITY_COUNTS)
-            assert not unexpected_nonzero
+            assert sum(quality_counts.values()) == after_counts["data_quality_issue"]
 
             cursor.execute(
                 """

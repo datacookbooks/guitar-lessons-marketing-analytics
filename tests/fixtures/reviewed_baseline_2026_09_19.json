@@ -1,0 +1,35 @@
+{
+  "purpose": "Historical regression evidence; not a recurring production gate.",
+  "analytics_counts": {
+    "dim_plan": 3,
+    "dim_campaign": 4,
+    "dim_customer": 11643,
+    "fact_subscription_period": 15076,
+    "fact_payment": 50777,
+    "fact_campaign_daily": 2979,
+    "fact_campaign_assignment": 92062,
+    "data_quality_issue": 9454
+  },
+  "quality_counts": {
+    "exact_duplicate": 1973,
+    "superseded_delivery": 6797,
+    "missing_value": 64,
+    "blank_value": 114,
+    "invalid_numeric": 210,
+    "unknown_reference": 296
+  },
+  "reporting_reconciliation": {
+    "new_paid_customers": 5244,
+    "movement_opening_paid": 44023,
+    "movement_churned_paid": 2793,
+    "retention_eligible": 47138,
+    "retention_retained": 30994,
+    "failed_billing_episodes": 4305,
+    "recovered_episodes": 3111,
+    "campaign_daily_rows": 2979,
+    "incremental_windows": 32,
+    "final_90d_windows": 26,
+    "quality_issues": 9454,
+    "sufficient_plan_clv_rows": 2
+  }
+}

@@ -114,17 +114,18 @@ Invalid values, exact duplicates, superseded deliveries, blanks, missing
 values, and unknown references remain measurable in the quality table.
 
 Upserts change rows only when selected lineage or typed values differ. The
-production runner validates the reviewed staging snapshot and the complete
-analytics reconciliation before commit. It can then rerun the transformation
-and fingerprint every persisted value, including audit timestamps, to prove
-unchanged-input invariance.
+production runner validates staging, manifest, watermark, and lineage
+invariants before commit. It can then rerun the transformation and fingerprint
+every persisted value, including audit timestamps, to prove unchanged-input
+invariance. Exact milestone counts remain test fixtures rather than gates for
+the growing production dataset.
 
 ### Reporting layer
 
 Seven reusable `analytics` helper views establish the lowest useful grains for
 the shared reporting cutoff, paid cohorts, monthly subscription state,
 customer-month contribution, CLV checkpoints, payment-recovery episodes, and
-campaign-assignment outcomes. Ten `reporting` views then expose stable
+campaign-assignment outcomes. Eleven `reporting` views then expose stable
 dashboard grains for movement, retention, recovery, value, CLV, campaign
 delivery, experiment arms, incremental impact, and data quality.
 
@@ -132,9 +133,17 @@ The reporting views retain additive numerators and denominators so rates,
 lift, ROAS, ROI, and other non-additive results can be recomputed for the
 selected dashboard context. Campaign spend and assignment outcomes are each
 reduced to a compatible campaign/window grain before joining. The guarded
-production runner verifies the reviewed analytics snapshot, reconciles the
-metric components before commit, and reapplies all 17 views to prove unchanged
-SQL is replaceable.
+production runner derives the current reporting cutoff, validates durable
+component relationships before commit, and reapplies all 18 views to prove
+unchanged SQL is replaceable.
+
+### Recurring orchestration
+
+GitHub Actions runs the canonical API-to-reporting entry point daily at 07:17
+UTC, one hour after upstream generation. A manual dispatch invokes the same
+pipeline for recovery. GitHub concurrency and a PostgreSQL advisory lock
+prevent overlap. The workflow uses short-lived AWS credentials through OIDC,
+verified RDS TLS, and temporary runner-specific PostgreSQL network access.
 
 ## 5. Repository structure
 
@@ -142,6 +151,7 @@ SQL is replaceable.
 guitar-lessons-marketing-analytics/
 ├── README.md
 ├── ARCHITECTURE.md
+├── .github/workflows/daily-elt.yml
 ├── extract_load/
 │   ├── config.py
 │   ├── extract.py
@@ -150,11 +160,13 @@ guitar-lessons-marketing-analytics/
 │   ├── staging_rows.py
 │   ├── postgres_loader.py
 │   ├── watermarks.py
+│   ├── pipeline_validation.py
 │   ├── run_initial_load.py
 │   ├── run_historical_staging_load.py
 │   ├── run_incremental_load.py
 │   ├── run_analytics_transform.py
 │   ├── run_reporting_views.py
+│   ├── run_daily_pipeline.py
 │   └── run_bi_access.py
 ├── sql/
 │   ├── schema/
@@ -175,6 +187,7 @@ guitar-lessons-marketing-analytics/
 │   ├── analytics_cleaning_contract.md
 │   ├── metric_definitions.md
 │   ├── dashboard_platform_decision.md
+│   ├── daily_elt_automation.md
 │   └── power_bi_semantic_model.md
 ├── tests/
 │   └── integration/
