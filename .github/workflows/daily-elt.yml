@@ -26,7 +26,6 @@ jobs:
       RDS_SECRET_ID: ${{ secrets.RDS_SECRET_ID }}
       RDS_SECURITY_GROUP_ID: ${{ secrets.RDS_SECURITY_GROUP_ID }}
       POSTGRES_SSLMODE: verify-full
-      POSTGRES_SSLROOTCERT: ${{ runner.temp }}/global-bundle.pem
       POSTGRES_CONNECT_TIMEOUT_SECONDS: "15"
 
     steps:
@@ -72,6 +71,9 @@ jobs:
       - name: Download Amazon RDS trust bundle
         run: |
           set -euo pipefail
+          POSTGRES_SSLROOTCERT="${RUNNER_TEMP}/global-bundle.pem"
+          echo "POSTGRES_SSLROOTCERT=$POSTGRES_SSLROOTCERT" >> "$GITHUB_ENV"
+
           curl \
             --proto '=https' \
             --tlsv1.2 \
