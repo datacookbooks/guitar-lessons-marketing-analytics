@@ -99,6 +99,37 @@ jobs:
           echo "runner_cidr=$runner_cidr" >> "$GITHUB_OUTPUT"
           echo "authorized=true" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for PostgreSQL network access
+        run: |
+          python - <<'PYTHON'
+          import os
+          import socket
+          import time
+
+          host = os.environ["POSTGRES_HOST"]
+          port = int(os.environ.get("POSTGRES_PORT", "5432"))
+          attempts = 12
+          delay_seconds = 5
+
+          for attempt in range(1, attempts + 1):
+              try:
+                  with socket.create_connection((host, port), timeout=5):
+                      print("PostgreSQL network access is ready.")
+                      break
+              except OSError:
+                  if attempt == attempts:
+                      raise SystemExit(
+                          "PostgreSQL remained unreachable after "
+                          f"{attempts} attempts."
+                      )
+
+                  print(
+                      f"PostgreSQL is not reachable yet "
+                      f"(attempt {attempt}/{attempts}); retrying..."
+                  )
+                  time.sleep(delay_seconds)
+          PYTHON
+
       - name: Run daily ELT
         run: python -m extract_load.run_daily_pipeline --apply
 
