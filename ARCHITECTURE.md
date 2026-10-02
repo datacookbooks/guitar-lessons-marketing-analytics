@@ -1,46 +1,40 @@
 # Guitar Lessons Marketing Analytics — Architecture
 
-This employer-facing portfolio project turns intentionally messy synthetic
-marketing and subscription data into trustworthy PostgreSQL models. It
-demonstrates Python extraction and loading, a replayable S3 raw layer, typed
-SQL transformations, explicit data-quality handling, and reusable reporting
-metrics. The standardized Power BI semantic model is implemented and
-validated; the polished report is the current milestone.
+This portfolio project turns intentionally messy synthetic marketing and
+subscription data into PostgreSQL analytics models and a Power BI report.
+GitHub Actions automates Python extraction and loading, a replayable S3 raw
+archive, typed SQL transformations, data-quality checks, and reporting-view
+validation.
 
 ## 1. Implemented architecture
 
 ```mermaid
 flowchart TD
-    A["GitHub Actions<br/>daily generation request"] --> B["Railway FastAPI + SQLite<br/>persistent source service"]
-    B --> C["Cursor-paginated<br/>read-only API"]
-    C --> D["Python extract/load commands<br/>currently run manually"]
-    D --> E["Amazon S3<br/>private raw JSON archive"]
-    E --> F["Validated S3 page reader"]
-    F --> G["RDS PostgreSQL<br/>source-shaped staging"]
-    G --> H["RDS PostgreSQL<br/>typed analytics models"]
-    H --> I["Reporting views<br/>implemented and validated"]
-    I --> J["Least-privilege Power BI access<br/>verified TLS + Import mode"]
-    J --> K["Canonical Power BI model<br/>16 Import tables + 15 measures"]
-    K --> L["Logically thin report<br/>current milestone"]
-    L --> M["Power BI service<br/>static public snapshot"]
-    M --> N["Anonymous website iframe<br/>publication path validated"]
+    SOURCE["Source GitHub Actions: daily generation"] --> API["Railway FastAPI and persistent SQLite"]
+    DAILY["Analytics GitHub Actions: daily ELT or manual dispatch"] --> RUNNER["Canonical Python pipeline runner"]
+    API --> RUNNER
+    RUNNER --> S3["Private S3 raw JSON archive"]
+    S3 --> STAGING["RDS PostgreSQL staging"]
+    STAGING --> ANALYTICS["Typed analytics tables and quality issues"]
+    ANALYTICS --> VIEWS["Reporting views"]
+    VIEWS --> BI["Manual Power BI Import refresh"]
+    BI --> PUBLIC["Manual publication and website iframe"]
 ```
 
 The source API lives in a separate repository. This analytics repository owns
-the API-to-S3 extraction, validated S3-to-PostgreSQL loading, analytics and
-reporting SQL, and later dashboard assets.
+API-to-S3 extraction, validated S3-to-PostgreSQL loading, analytics and
+reporting SQL, and recurring orchestration.
 
-The implemented path is deliberately S3-first. PostgreSQL never loads an
-unarchived API response: the pipeline writes complete API pages to S3, then
-rediscovers and validates that exact run before allowing staging writes. This
-makes each delivery inspectable and replayable.
+The pipeline archives complete API pages in S3, then rediscovers and validates
+that exact run before allowing staging writes. Each delivery remains
+inspectable and replayable.
 
 ## 2. Source service
 
 The Railway service uses FastAPI with SQLite on a persistent volume. GitHub
-Actions calls its token-protected generation endpoint daily. Generation is
-deterministic, backfills missed dates, and is idempotent for each business
-date.
+Actions calls its token-protected generation endpoint daily at 06:17 UTC.
+Generation is deterministic, backfills missed dates, and is idempotent for
+each business date.
 
 The analytics repository uses only the public read endpoints:
 
@@ -79,8 +73,10 @@ One encrypted RDS PostgreSQL instance contains three schemas:
 | `analytics` | Typed deduplicated dimensions/facts and source quality issues |
 | `reporting` | Stable dashboard-facing metric views and additive components |
 
-The connection uses verified TLS. Credentials, endpoints, AWS identifiers,
-and the root-certificate path remain in the ignored local environment.
+Connections use `verify-full` TLS with an Amazon RDS CA bundle. Automated
+runs obtain database settings from AWS Secrets Manager and use temporary AWS
+credentials through GitHub OIDC. Local commands read their configuration from
+the ignored `.env` file.
 
 ### Staging layer
 
@@ -117,8 +113,8 @@ Upserts change rows only when selected lineage or typed values differ. The
 production runner validates staging, manifest, watermark, and lineage
 invariants before commit. It can then rerun the transformation and fingerprint
 every persisted value, including audit timestamps, to prove unchanged-input
-invariance. Exact milestone counts remain test fixtures rather than gates for
-the growing production dataset.
+invariance. Recurring production checks use invariants that remain valid as
+the dataset grows.
 
 ### Reporting layer
 
@@ -139,11 +135,48 @@ unchanged SQL is replaceable.
 
 ### Recurring orchestration
 
-GitHub Actions runs the canonical API-to-reporting entry point daily at 07:17
-UTC, one hour after upstream generation. A manual dispatch invokes the same
-pipeline for recovery. GitHub concurrency and a PostgreSQL advisory lock
-prevent overlap. The workflow uses short-lived AWS credentials through OIDC,
-verified RDS TLS, and temporary runner-specific PostgreSQL network access.
+`.github/workflows/daily-elt.yml` schedules the pipeline at 07:17 UTC
+(`17 7 * * *`), leaving one hour after upstream generation. The repositories
+have independent schedules. GitHub Actions may start a scheduled run later;
+committed per-table watermarks determine which source rows are extracted.
+`workflow_dispatch` invokes the same entry point for recovery or verification:
+
+```bash
+python -m extract_load.run_daily_pipeline --apply
+```
+
+The workflow installs dependencies under Python 3.12 and runs
+`python -m pytest -q`. It then assumes an AWS role through OIDC, retrieves RDS
+settings from Secrets Manager, downloads the official CA bundle, and grants
+the runner's public IPv4 `/32` temporary access to PostgreSQL on port 5432.
+A bounded TCP readiness check makes up to 12 attempts before ELT begins.
+The cleanup step removes the temporary ingress rule after success or failure.
+
+The runner holds a PostgreSQL session-level advisory lock across these stages:
+
+1. Read the seven committed source-table watermarks.
+2. Extract later API rows and archive nonempty pages under one UTC S3 run ID.
+3. Rediscover and validate that run's tables, pages, and cursor ranges.
+4. Load pages into staging using transactional manifests and watermarks.
+5. Replay the exact run and require zero newly loaded pages; reconcile final
+   watermarks and staging lineage.
+6. Apply and validate the analytics transformation, including an unchanged-input
+   rerun check.
+7. Apply and validate all 18 analytics-helper and reporting views, including
+   a repeated application of unchanged SQL.
+8. Write a GitHub Actions summary with source rows, archived and loaded pages,
+   analytics rows, quality issues, and the reporting cutoff date.
+
+GitHub Actions concurrency uses `cancel-in-progress: false`; the database lock
+also rejects overlapping canonical runs started outside GitHub Actions.
+A failed stage stops downstream execution. Page commits preserve durable
+progress; a recovery run reads committed watermarks to process remaining rows.
+The incremental-load utility can also resume a specific archived run using
+its extraction date, run ID, and page-count contract.
+
+Running the daily module without `--apply` performs read-only API and
+PostgreSQL readiness checks. Configuration and recovery instructions are in
+[Daily ELT automation](docs/daily_elt_automation.md).
 
 ## 5. Repository structure
 
@@ -201,100 +234,52 @@ guitar-lessons-marketing-analytics/
 └── infra/
 ```
 
-## 6. Validated milestone state
+## 6. Validation and recovery
 
-The selected historical load contained 173 S3 objects and 169,932 staging
-rows. A later incremental run added five objects and 213 rows. The reconciled
-staging baseline used for analytics therefore contains 178 manifest objects
-and 170,145 rows, with no duplicate `_raw_row_id` values.
+Recurring checks validate the current dataset rather than fixed row counts:
 
-The initial production analytics transformation committed 166,806 rows across
-the seven business models, including the synthetic unknown campaign, plus
-5,848 quality records. A complete second transformation over unchanged
-staging changed no persisted values.
+- The API advertises exactly the seven supported source tables.
+- Staging raw-row identifiers are unique and retain loaded-object lineage.
+- Manifest totals cover retained staging rows, and committed watermarks match
+  the greatest loaded cursors.
+- The archived run matches its extraction contract, including zero-page tables.
+- Exact-run replay changes no staging rows, manifests, or watermarks.
+- Analytics counts do not decrease, and analytics and quality rows retain valid
+  staging lineage.
+- Reporting components reconcile: retained customers do not exceed eligible
+  customers, recovered episodes do not exceed failed episodes, and finalized
+  experiment windows do not exceed all windows.
+- Reporting quality counts match analytics quality counts.
+- Unchanged inputs preserve analytics values and reporting view definitions.
 
-The reporting milestone committed seven helper views and ten dashboard-facing
-views after rollback-only RDS validation. Production reconciliation confirmed
-41,458 opening paid observations, 2,664 churned opening observations, 45,261
-mature retention checkpoints, 4,109 failed billing episodes, 2,904 campaign
-daily rows, 32 incremental measurement windows, and 5,848 quality issues. A
-second unchanged-input application produced identical view definitions and
-reconciled exactly.
+Each staging page commits independently. Analytics transformations and
+reporting-view application use their own transaction boundaries; the daily
+pipeline is not one transaction spanning all layers. After correcting a
+failure, **Run workflow** executes the canonical pipeline again using durable
+committed progress.
 
-The Power BI connectivity and publication spike then validated the dashboard
-delivery path. A versioned `marketing_analytics_bi_reader` `NOLOGIN` role
-grants only the approved analytics dimensions and reporting views. A separate
-operational login inherits that role, defaults to read-only transactions, and
-was verified to be unable to read staging or persist source changes.
+## 7. Power BI delivery
 
-Power BI Desktop `2.157.879.0`, 64-bit (August 2026), runs through Parallels.
-It connected to RDS through the existing single-public-IP `/32` using verified
-TLS after the official Amazon RDS `us-east-1` CA bundle was installed in the
-Windows trusted-root store. A manual Desktop refresh succeeded. The remaining
-approved BI objects were imported into the canonical working PBIX before a
-temporary relocation, and every loaded table was confirmed as Import mode.
+Power BI Desktop connects to approved dimensions and reporting views through
+verified TLS and a least-privilege BI login. The versioned
+`marketing_analytics_bi_reader` `NOLOGIN` role grants access to an explicit
+allowlist; the operational login inherits that role and defaults to read-only
+transactions. It cannot read staging or persist source changes.
 
-An independently controlled Microsoft Entra tenant provides a dedicated
-Fabric Free identity and restricts Publish-to-web creation to the security
-group `Power BI Publish to Web Creators`. A disposable report and semantic
-model were published to `My workspace`; the Fabric Free identity created a
-public embed code without Pro or PPU. The public URL rendered without sign-in
-in an incognito browser, and the report remained interactive inside a local
-HTML iframe. The disposable public artifacts are retained temporarily as a
-known-working reference and must be removed when the final portfolio report
-replaces them.
+The semantic model uses Import mode, shared dimensions, explicit relationships,
+a marked Date table, a paid-tenure dimension, and DAX measures. Power Query
+performs presentation and type adjustments; SQL defines the reusable reporting
+metrics. The model contract is documented in
+[Power BI semantic model](docs/power_bi_semantic_model.md).
 
-The canonical Power BI model is also complete. It contains 16 Import tables,
-22 many-to-one single-direction relationships (21 active and one inactive), a
-marked 1,096-row `Date` table, a 12-row `Paid Tenure Month` dimension, and 15
-visible valid measures in `Shared Measures`. Automatic date/time is disabled.
-Technical keys, lineage, duplicated dimension attributes, unsafe SQL rates,
-and non-additive paid-CLV components are hidden from ordinary report
-construction.
+A manual Desktop refresh re-queries the report-facing SQL views. The report is
+published to the Power BI service and embedded on the portfolio website using
+Publish to web. The public report displays the published Import snapshot.
+Database ELT runs update S3 and PostgreSQL; Power BI refresh and republication
+are separate manual operations. The service publication uses no scheduled
+refresh, gateway, service-side PostgreSQL credentials, or DirectQuery.
 
-Final filter tests reconciled Date/Campaign daily rows, 41,458 opening paid
-exposures, 2,664 churned customers, 45,261 retention-eligible checkpoints,
-and 29,782 retained checkpoints. Missing-spend guardrails returned blank for
-incomplete selections; spend-complete selections reconciled to $228.22898
-incremental CAC, 0.1498596 incremental 90-day ROAS, and -91.09694% incremental
-90-day ROI. The model contract and screenshots are recorded in
-`docs/power_bi_semantic_model.md`.
-
-## 7. Current and deferred workflow
-
-The API generation schedule is implemented in GitHub Actions. Historical and
-incremental extraction/loading, analytics transformation, and validation are
-currently deliberate manual commands. This keeps failure handling observable
-while dashboard connectivity and modeling are evaluated.
-
-The final public Power BI artifact will be a manually refreshed static Import
-snapshot. The Power BI service does not require a gateway, scheduled refresh,
-database credentials, DirectQuery, continuous RDS availability, or broader
-database ingress. Model and report work can continue offline from the saved
-PBIX as long as no source refresh or source-dependent Power Query change is
-triggered.
-
-Automatic downstream scheduling has not been selected or implemented. Earlier
-plans mentioned Lambda and EventBridge, but those are options rather than
-current infrastructure. Scheduling should be chosen only after the reporting
-layer, final semantic model, dashboard, and end-to-end manual workflow are
-complete.
-
-## 8. Remaining build order
-
-1. Select Power BI and prove secure PostgreSQL connectivity, Import refresh,
-   Fabric Free publication, anonymous public access, and iframe behavior.
-   **Complete.**
-2. Build one standardized Import semantic model with explicit relationships,
-   a date table, documented measures, formats, and hidden technical fields.
-   **Complete.**
-3. Build a logically thin report against that canonical model, verify the final
-   configuration remains compatible with Publish to web, reconcile important
-   measures to SQL, and capture repository screenshots.
-4. Finish employer-facing setup and documentation.
-5. Decide whether and how to schedule the downstream pipeline.
-
-## 9. Reporting design rules
+## 8. Reporting design rules
 
 - Paid churn includes cancellation and paid-to-Free movement.
 - Pro-to-Master and Master-to-Pro movements are upgrades or downgrades, not
@@ -305,20 +290,3 @@ complete.
   grains before joining to avoid row multiplication.
 - Dashboard queries read stable `reporting` views rather than reproducing
   metric definitions in the visualization layer.
-
-## 10. Current dashboard decisions and open questions
-
-- Power BI is selected; Desktop runs through Parallels and reads RDS only from
-  the authorized public IPv4 `/32`.
-- The public report uses a manually refreshed static Import snapshot and
-  Publish to web from the independently controlled Fabric Free tenant.
-- No Pro purchase, gateway, scheduled service refresh, service-side RDS
-  credentials, DirectQuery, paid Fabric capacity, or broadened RDS ingress is
-  required for the tested path.
-- The canonical 16-table Import model, relationships, date and tenure
-  dimensions, 15 shared measures, presentation metadata, and validation
-  evidence are complete. The polished logically thin report is next.
-- A physically separate thin report will be adopted only if the exact
-  configuration is verified as Publish-to-web compatible; one canonical PBIX
-  containing the model and report is an acceptable fallback.
-- The exact downstream scheduling mechanism and timing remain deferred.

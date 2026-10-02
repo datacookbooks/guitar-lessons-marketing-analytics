@@ -8,22 +8,20 @@ archives the API responses in Amazon S3, loads them into PostgreSQL, and builds
 reporting views for churn, retention, customer lifetime value, campaign
 performance, and data quality.
 
-## Current phase
+## Current implementation
 
-The source API, historical extraction, private S3 archive, PostgreSQL staging
-contract, secured RDS instance, historical and incremental staging loads,
-cleaned typed analytics layer, metric contracts, and tested reporting views
-are complete. Power BI connectivity, Fabric Free anonymous publication, and
-the standardized 16-table Import semantic model are also implemented and
-validated. The recurring API-to-reporting ELT pipeline is automated through
-GitHub Actions. The Power BI publication remains a deliberately reviewed
-static Import snapshot rather than an automatically republished report.
+GitHub Actions automates the recurring API-to-reporting ELT pipeline:
+extraction from the source API, archival in Amazon S3, transactional staging
+loads, SQL transformation, and reporting-view validation. The database layers
+support a standardized Power BI Import semantic model and a published public
+report. Power BI refresh and publication are performed manually.
 
 ## Daily analytics ELT
 
-`.github/workflows/daily-elt.yml` runs the complete pipeline every day at
-07:17 UTC, one hour after the source API's 06:17 UTC generation schedule. The
-same workflow can be started manually through `workflow_dispatch` for a safe
+`.github/workflows/daily-elt.yml` schedules the complete API-to-reporting
+pipeline daily at 07:17 UTC (`17 7 * * *`), one hour after the source API's
+06:17 UTC generation schedule. GitHub Actions may start scheduled runs later
+than the specified time. The same workflow can be started manually through `workflow_dispatch` for a safe
 rerun or operational recovery.
 
 Both triggers call the same canonical entry point:
@@ -37,10 +35,31 @@ verifies exact-run replay safety, rebuilds analytics, replaces reporting
 views, and checks durable source-to-target invariants. A PostgreSQL advisory
 lock and GitHub Actions concurrency group prevent overlapping runs.
 
+The workflow uses Python 3.12 and runs `python -m pytest -q` before ELT.
+It assumes an AWS role through OpenID Connect (OIDC), retrieves the database
+connection settings from AWS Secrets Manager, downloads the Amazon RDS CA
+bundle, and uses `verify-full` TLS. It temporarily authorizes the runner's
+IPv4 `/32` on port 5432 and checks network readiness with bounded retries
+before starting the pipeline. A cleanup step removes that authorization after
+success or failure. Successful runs write counts and the reporting cutoff to
+the GitHub Actions job summary.
+
+To check API and PostgreSQL readiness without writing to S3 or PostgreSQL:
+
+```bash
+python -m extract_load.run_daily_pipeline
+```
+
+For recovery, use **Run workflow** in GitHub Actions to execute the same
+watermark-driven pipeline. The commands below provide individual-stage
+inspection, historical loading, and archived-run recovery; the daily runner
+already performs incremental loading, analytics transformation, and reporting
+validation.
+
 See [Daily ELT automation](docs/daily_elt_automation.md) for configuration,
 security, validation, and recovery details.
 
-## Historical staging load
+## Historical staging-load utility
 
 The default command performs read-only S3 discovery and never opens a
 PostgreSQL connection:
@@ -64,7 +83,7 @@ The selected extraction date, run ID, S3 bucket, AWS profile, and PostgreSQL
 connection values come from the ignored local `.env`; private identifiers are
 not hardcoded in the entry point.
 
-## Incremental staging load
+## Incremental staging-load utility
 
 The incremental command reads exactly one committed PostgreSQL cursor for each
 source table, extracts only later API rows, and archives only nonempty pages
@@ -105,7 +124,7 @@ plus `analytics.data_quality_issue`. The cleaning contract documents guarded
 casts, normalization, deterministic delivery selection, late corrections, the
 unknown-campaign member, and measurable rejected or superseded values.
 
-Inspect the reviewed SQL plan without opening PostgreSQL:
+Inspect the SQL plan without opening PostgreSQL:
 
 ```bash
 python -m extract_load.run_analytics_transform
@@ -122,9 +141,9 @@ python -m extract_load.run_analytics_transform \
 The command validates staging, manifest, watermark, and lineage invariants
 before analytics writes. It applies the versioned DDL and transformation,
 requires nondecreasing model counts and valid source lineage, and fingerprints
-a second unchanged-staging run to prove value invariance. The original
-September 19 reviewed counts remain versioned under `tests/fixtures` as
-regression evidence; they are not production gates for growing daily data.
+a second unchanged-staging run to prove value invariance. Recurring validation
+uses source-to-target relationships and rerun invariance that remain valid as
+the dataset grows.
 
 ## Reporting views
 
@@ -136,7 +155,7 @@ incremental campaign impact, and data-quality summaries. The metric contract
 documents every grain, eligibility rule, time window, additive component, and
 intended downstream aggregation.
 
-Inspect the reviewed SQL plan without opening PostgreSQL:
+Inspect the SQL plan without opening PostgreSQL:
 
 ```bash
 python -m extract_load.run_reporting_views
